@@ -6,7 +6,7 @@
 
 ## Назначение
 
-Интеграция обслуживает только экосистему ESP32 + Xiaomi LYWSD03MMC. Общие функции управления ESP32 (OTA, Restart, Factory Reset и базовая идентификация) остаются в универсальной интеграции esp32-mqtt-ha-integration и Platform Core. Xiaomi-специфичные сущности и операции не добавляются в универсальную интеграцию.
+Интеграция обслуживает только экосистему ESP32 + Xiaomi LYWSD03MMC. Общие функции управления ESP32 (OTA, Restart, Factory Reset и базовая идентификация) остаются в универсальной интеграции esp32-integration-core и Platform Core. Xiaomi-специфичные сущности и операции не добавляются в универсальную интеграцию.
 
 ## Целевые возможности
 
@@ -31,7 +31,7 @@
 
 ## Сервисы управления
 
-Планируемый домен сервисов: esp32_xiaomi_lywsd03.
+Планируемый домен сервисов: esp32-component-xiaomi-lywsd03.
 
 - add_sensor — добавить датчик на выбранный шлюз по MAC и bind-key;
 - remove_sensor — удалить датчик с выбранного шлюза по MAC.
@@ -101,9 +101,9 @@ UI находится в репозитории [esp32-card](https://github.com/
 
 ## Связанные проекты
 
-- [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03-firmware)
+- [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-firmware-xiaomi-lywsd03)
 - [ESP32 Platform Core](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-core)
-- [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-ble)
+- [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-component-ble)
 - [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03)
 - [ESP32 Lovelace Cards](https://github.com/lavrenovalexsandr-cmyk/esp32-card)
 
