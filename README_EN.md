@@ -6,7 +6,7 @@ A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC
 
 ## Purpose
 
-This integration serves only the ESP32 + Xiaomi LYWSD03MMC ecosystem. Generic ESP32 management (OTA, Restart, Factory Reset and base identity) remains in the universal esp32-mqtt-ha-integration and Platform Core. Xiaomi-specific entities and operations do not belong in the universal integration.
+This integration serves only the ESP32 + Xiaomi LYWSD03MMC ecosystem. Generic ESP32 management (OTA, Restart, Factory Reset and base identity) remains in the universal esp32-integration-core and Platform Core. Xiaomi-specific entities and operations do not belong in the universal integration.
 
 ## Target features
 
@@ -31,7 +31,7 @@ This integration serves only the ESP32 + Xiaomi LYWSD03MMC ecosystem. Generic ES
 
 ## Sensor management services
 
-Planned service domain: esp32_xiaomi_lywsd03.
+Planned service domain: esp32-component-xiaomi-lywsd03.
 
 - add_sensor — add a sensor to a selected gateway using its MAC and bind-key;
 - remove_sensor — remove a sensor from a selected gateway using its MAC.
@@ -101,9 +101,9 @@ Its visual style should match the existing ESP32 cards.
 
 ## Related projects
 
-- [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03-firmware)
+- [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-firmware-xiaomi-lywsd03)
 - [ESP32 Platform Core](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-core)
-- [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-ble)
+- [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-component-ble)
 - [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03)
 - [ESP32 Lovelace Cards](https://github.com/lavrenovalexsandr-cmyk/esp32-card)
 
