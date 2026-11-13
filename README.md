@@ -104,7 +104,7 @@ UI находится в репозитории [esp32-card](https://github.com/
 - [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-firmware-xiaomi-lywsd03)
 - [ESP32 Platform Core](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-core)
 - [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-component-ble)
-- [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03)
+- [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-component-xiaomi-lywsd03)
 - [ESP32 Lovelace Cards](https://github.com/lavrenovalexsandr-cmyk/esp32-card)
 
 Основная документация — README.md на русском языке; английская версия — README_EN.md.
