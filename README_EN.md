@@ -104,7 +104,7 @@ Its visual style should match the existing ESP32 cards.
 - [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-firmware-xiaomi-lywsd03)
 - [ESP32 Platform Core](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-core)
 - [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-component-ble)
-- [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-xiaomi-lywsd03)
+- [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-component-xiaomi-lywsd03)
 - [ESP32 Lovelace Cards](https://github.com/lavrenovalexsandr-cmyk/esp32-card)
 
 The primary documentation is README.md in Russian. The English version is README_EN.md.
