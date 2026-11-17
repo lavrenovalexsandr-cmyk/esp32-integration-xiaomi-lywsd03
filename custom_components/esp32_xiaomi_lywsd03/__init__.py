@@ -159,6 +159,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if re.fullmatch(MAC_RE, mac):
                 macs.add(mac)
         update_gateway(device_id, **{kind: macs})
+        if kind == "registry":
+            # Keep a successful add reserved until the authoritative retained
+            # registry confirms it, regardless of result/snapshot arrival order.
+            for reserved_mac, owner in list(data[DATA_PENDING_MACS].items()):
+                if owner[0] == device_id and reserved_mac in macs:
+                    data[DATA_PENDING_MACS].pop(reserved_mac, None)
 
     async def discovered_message(msg: mqtt.ReceiveMessage) -> None:
         await snapshot_message(msg, "discovered")
@@ -175,9 +181,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if cancel:
             cancel()
         mac = pending["mac"]
-        if pending["action"] == "add":
-            data[DATA_PENDING_MACS].pop(mac, None)
         gateway = data[DATA_GATEWAYS].get(device_id)
+        if pending["action"] == "add":
+            if result in ("success", "already_exists") and (
+                gateway is None or mac not in gateway["registry"]
+            ):
+                data[DATA_PENDING_MACS][mac] = (device_id, "awaiting_registry")
+            else:
+                data[DATA_PENDING_MACS].pop(mac, None)
         if gateway is not None:
             gateway["pending"] = [
                 item for item in gateway["pending"] if item["request_id"] != request_id
