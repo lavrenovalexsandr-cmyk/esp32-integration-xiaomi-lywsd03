@@ -9,12 +9,5 @@
     "abort": {
       "already_configured": "The integration is already configured."
     }
-  },
-  "entity": {
-    "sensor": {
-      "xiaomi_sensors": {
-        "name": "Xiaomi sensors"
-      }
-    }
   }
 }
