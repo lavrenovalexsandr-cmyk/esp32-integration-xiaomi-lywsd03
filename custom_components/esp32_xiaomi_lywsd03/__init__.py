@@ -155,7 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
             name=gateway["name"],
             model=gateway["model"],
-            manufacturer="ESP32",
+            manufacturer="Espressif",
         )
         return gateway
 
@@ -270,10 +270,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             not isinstance(request_id, str)
             or not request_id
             or len(request_id) > 64
-            or action not in ("add", "remove")
-            or not MAC_RE.fullmatch(mac)
             or not isinstance(action, str)
             or action not in ("add", "remove")
+            or not MAC_RE.fullmatch(mac)
             or not isinstance(status, str)
             or status not in RESULT_MESSAGES
         ):
