@@ -17,6 +17,20 @@ Responsibilities:
 
 The Xiaomi integration must not create duplicate gateway devices, sensor devices or sensor entities. Firmware publishes sensor devices and their three entities through Platform Core's standard MQTT Discovery.
 
+## Shared ESP32 gateway identity
+
+The Xiaomi integration is independent of `esp32_ota`: it must not import its code or require it to be installed.
+
+To merge information from different ESP32 integrations into one Home Assistant Device Registry entry, use the shared gateway identifier:
+
+```python
+identifiers={("esp32", device_id)}
+```
+
+Here, `esp32` is the platform-wide namespace and `device_id` is the stable ID from MQTT identity. The gateway name and model must come from the same MQTT identity fields (`name` and `model`) so integrations expose consistent device information.
+
+**Xiaomi integration implementation task:** obtain gateway MQTT identity independently and use `("esp32", device_id)` when registering/enriching the gateway device. Do not use `("esp32_ota", device_id)` or rely on `esp32_ota` being installed. Xiaomi services continue to accept the stable `device_id`.
+
 ## Features
 
 - Support multiple ESP32 gateways.
