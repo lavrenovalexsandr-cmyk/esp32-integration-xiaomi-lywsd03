@@ -250,6 +250,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if message_type == "registry":
                 gateway["registry"] = registry
                 gateway["registry_received"] = True
+                for reserved_mac, reservation in list(data[DATA_PENDING_ADDS].items()):
+                    if reserved_mac in registry or (
+                        reservation["device_id"] == device_id
+                        and reservation["state"] == "uncertain"
+                    ):
+                        data[DATA_PENDING_ADDS].pop(reserved_mac, None)
             else:
                 gateway["discovered"] = sensors
                 gateway["discovered_received"] = True
@@ -328,7 +334,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not isinstance(bind_key, str) or not BIND_KEY_RE.fullmatch(bind_key):
                 raise HomeAssistantError("Bind-key должен содержать ровно 32 hex-символа.")
             if mac in data[DATA_PENDING_ADDS]:
-                raise HomeAssistantError("Добавление этого MAC уже выполняется.")
+                raise HomeAssistantError(
+                    "Добавление этого MAC уже выполняется или ожидает синхронизации реестра."
+                )
             unsynchronized = [
                 item["device_id"]
                 for item in data[DATA_GATEWAYS].values()
@@ -351,8 +359,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 raise HomeAssistantError(
                     f"Датчик {mac} уже сохранён на шлюзе {owner}."
                 )
-            data[DATA_PENDING_ADDS].add(mac)
+            data[DATA_PENDING_ADDS][mac] = {
+                "device_id": device_id,
+                "state": "pending",
+            }
 
+        keep_add_reservation = False
         request_id = uuid.uuid4().hex
         future: asyncio.Future[str] = hass.loop.create_future()
         pending_key = (device_id, request_id)
@@ -379,23 +391,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             # Do not retain the command or bind-key in integration state.
             command.clear()
-            try:
-                status = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
-            except asyncio.TimeoutError as err:
-                raise HomeAssistantError(
-                    "Шлюз не подтвердил команду за отведённое время. "
-                    "Состояние будет уточнено по следующему retained snapshot."
-                ) from err
-            if status != "success":
+            status = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
+            if status == "success" and action == "add":
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "awaiting_registry"
+                    keep_add_reservation = True
+            elif status != "success":
                 raise HomeAssistantError(RESULT_MESSAGES[status])
+        except asyncio.TimeoutError as err:
+            if action == "add":
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
+            raise HomeAssistantError(
+                "Шлюз не подтвердил команду за отведённое время. "
+                "Дождитесь синхронизации retained registry перед повторной попыткой."
+            ) from err
         except HomeAssistantError:
             raise
         except Exception as err:
             raise HomeAssistantError("Не удалось отправить команду ESP32 через MQTT.") from err
         finally:
             data[DATA_PENDING].pop(pending_key, None)
-            if action == "add":
-                data[DATA_PENDING_ADDS].discard(mac)
+            if action == "add" and not keep_add_reservation:
+                data[DATA_PENDING_ADDS].pop(mac, None)
             if not future.done():
                 future.cancel()
 
