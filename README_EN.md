@@ -109,7 +109,7 @@ Areas are not sent over MQTT or stored in firmware. Users assign Areas through n
 - Validate the MAC and key representation before publishing.
 - Address each command only to the selected gateway.
 - MQTT commands use `retain=false`.
-- Do not keep the key in long-lived integration or card state after submission.
+- Do not keep the key in long-lived integration or panel state after submission.
 
 ## MQTT contract
 
@@ -128,7 +128,7 @@ The panel is included in this integration repository, registered as a Home Assis
 2. show discovered and saved sensors for the selected gateway;
 3. mark saved sensors as **Save** and new sensors as **New**;
 4. provide a bind-key field only for adding;
-5. allow removal of a saved sensor from the same card;
+5. allow removal of a saved sensor from the same panel;
 6. call `esp32_xiaomi_lywsd03.add_sensor` and `esp32_xiaomi_lywsd03.remove_sensor`.
 
 The panel reads state through the integration's WebSocket API and calls its services. It does not communicate with the MQTT broker directly.
