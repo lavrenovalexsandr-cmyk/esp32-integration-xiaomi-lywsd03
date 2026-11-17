@@ -257,13 +257,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 gateway["registry_received"] = True
                 gateway["registry_revision"] += 1
                 for reserved_mac, reservation in list(data[DATA_PENDING_ADDS].items()):
-                    if reserved_mac in registry or (
-                        reservation["device_id"] == device_id
-                        and reservation["state"] == "uncertain"
-                    ) or (
-                        reservation["device_id"] == device_id
-                        and reservation["state"] == "awaiting_registry"
-                        and reservation["registry_revision"] < gateway["registry_revision"]
+                    if reservation["device_id"] == device_id and (
+                        reserved_mac in registry
+                        or (
+                            reservation["state"] == "awaiting_registry"
+                            and reservation["registry_revision"] < gateway["registry_revision"]
+                        )
                     ):
                         data[DATA_PENDING_ADDS].pop(reserved_mac, None)
             else:
@@ -460,6 +459,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     keep_add_reservation = True
             raise HomeAssistantError("Не удалось отправить команду ESP32 через MQTT.") from err
         finally:
+            command.clear()
             data[DATA_PENDING].pop(pending_key, None)
             if action == "add" and not keep_add_reservation:
                 data[DATA_PENDING_ADDS].pop(mac, None)
