@@ -1,6 +1,7 @@
-"""ESP32 Xiaomi LYWSD03MMC Home Assistant integration."""
+"""Home Assistant integration for ESP32 Xiaomi LYWSD03MMC gateways."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -8,342 +9,484 @@ import uuid
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components import mqtt
+from homeassistant.components import mqtt, websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_call_later
 
 from .const import (
-    ADD_SERVICE,
     AVAILABILITY_TOPIC,
-    BIND_KEY_RE,
-    COMMAND_RESULT_TOPIC,
-    DEVICE_ID_RE,
+    BIND_KEY_PATTERN,
+    COMMAND_TIMEOUT,
+    DATA_GATEWAYS,
+    DATA_PENDING,
+    DATA_PENDING_ADDS,
+    DATA_UNSUB,
+    DEVICE_ID_PATTERN,
     DEVICE_IDENTIFIER_NAMESPACE,
-    DISCOVERED_TOPIC,
     DOMAIN,
+    EVENT_COMMAND_RESULT,
+    EVENT_STATE_UPDATED,
     IDENTITY_TOPIC,
-    MAC_RE,
-    NAME,
-    PLATFORMS,
-    REGISTRY_TOPIC,
-    REMOVE_SERVICE,
-    REQUEST_TIMEOUT,
-    VERSION,
+    MAC_PATTERN,
+    MAX_REQUEST_ID_LENGTH,
+    PROTOCOL_VERSION,
+    SERVICE_ADD_SENSOR,
+    SERVICE_REMOVE_SENSOR,
+    XIAOMI_TOPICS,
 )
 
 _LOGGER = logging.getLogger(__name__)
-DATA_GATEWAYS = "gateways"
-DATA_UNSUB = "unsub"
-DATA_PENDING = "pending"
-DATA_PENDING_MACS = "pending_macs"
-DATA_ADD_ENTITIES = "add_entities"
-DATA_ENTITY_IDS = "entity_ids"
+
+DEVICE_ID_RE = re.compile(DEVICE_ID_PATTERN)
+MAC_RE = re.compile(MAC_PATTERN)
+BIND_KEY_RE = re.compile(BIND_KEY_PATTERN)
+
+RESULT_MESSAGES = {
+    "success": "Операция выполнена.",
+    "already_exists": "Датчик уже сохранён на этом шлюзе.",
+    "not_found": "Датчик не найден в реестре шлюза.",
+    "full": "Реестр датчиков шлюза заполнен.",
+    "invalid_argument": "Шлюз отклонил некорректные аргументы.",
+    "storage_error": "Шлюз сообщил об ошибке хранилища.",
+    "busy": "Компонент Xiaomi на шлюзе занят. Повторите попытку позже.",
+    "not_initialized": "Компонент Xiaomi на шлюзе ещё не инициализирован.",
+}
 
 
-def _decode_payload(payload: str | bytes) -> dict[str, Any] | None:
+def _new_gateway(device_id: str) -> dict[str, Any]:
+    """Return an empty in-memory state for a gateway."""
+    return {
+        "device_id": device_id,
+        "name": f"ESP32-{device_id[-6:]}",
+        "model": "ESP32",
+        "available": False,
+        "identity_received": False,
+        "discovered": {},
+        "registry": set(),
+        "registry_received": False,
+        "registry_revision": 0,
+        "discovered_received": False,
+    }
+
+
+def _gateway_state(data: dict[str, Any], device_id: str) -> dict[str, Any]:
+    """Get or create a gateway state record."""
+    return data[DATA_GATEWAYS].setdefault(device_id, _new_gateway(device_id))
+
+
+def _fire_state_updated(hass: HomeAssistant, device_id: str) -> None:
+    """Notify frontend clients that a gateway snapshot changed."""
+    hass.bus.async_fire(EVENT_STATE_UPDATED, {"device_id": device_id})
+
+
+def _parse_snapshot(payload: str | bytes) -> dict[str, Any] | None:
+    """Parse and validate a versioned sensor snapshot."""
     try:
-        value = json.loads(payload)
+        parsed = json.loads(payload)
     except (ValueError, TypeError):
         return None
-    if not isinstance(value, dict) or value.get("version") != VERSION:
+    if (
+        not isinstance(parsed, dict)
+        or type(parsed.get("version")) is not int
+        or parsed.get("version") != PROTOCOL_VERSION
+        or not isinstance(parsed.get("sensors"), list)
+    ):
         return None
-    return value
+    return parsed
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/get_state"}
+)
+@websocket_api.async_response
+async def websocket_get_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return gateway snapshots to the Xiaomi Sensor Manager card."""
+    entries = hass.data.get(DOMAIN, {})
+    data = next(
+        (value for key, value in entries.items() if not key.startswith("_")),
+        None,
+    )
+    gateways = []
+    if data is not None:
+        for gateway in data[DATA_GATEWAYS].values():
+            if not gateway["identity_received"]:
+                continue
+            gateways.append(
+                {
+                    "device_id": gateway["device_id"],
+                    "name": gateway["name"],
+                    "model": gateway["model"],
+                    "available": gateway["available"],
+                    "identity_received": gateway["identity_received"],
+                    "registry_received": gateway["registry_received"],
+                    "discovered_received": gateway["discovered_received"],
+                    "discovered": sorted(
+                        gateway["discovered"].values(),
+                        key=lambda item: item["mac"],
+                    ),
+                    "registry": sorted(gateway["registry"]),
+                }
+            )
+    connection.send_result(msg["id"], {"gateways": gateways})
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up the integration domain."""
+    hass.data.setdefault(DOMAIN, {})
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    hass.data.setdefault(DOMAIN, {})
+    """Set up the Xiaomi integration entry."""
     data: dict[str, Any] = {
         DATA_GATEWAYS: {},
         DATA_UNSUB: [],
         DATA_PENDING: {},
-        DATA_PENDING_MACS: {},
-        DATA_ADD_ENTITIES: None,
-        DATA_ENTITY_IDS: set(),
+        DATA_PENDING_ADDS: {},
+        "entry": entry,
     }
-    hass.data[DOMAIN][entry.entry_id] = data
-    signal = f"{DOMAIN}_{entry.entry_id}_update"
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
     device_registry = dr.async_get(hass)
 
-    def update_gateway(device_id: str, **values: Any) -> None:
-        gateway = data[DATA_GATEWAYS].setdefault(
-            device_id,
-            {
-                "id": device_id,
-                "name": f"ESP32-{device_id[-6:]}",
-                "model": "ESP32",
-                "available": False,
-                "discovered": set(),
-                "registry": set(),
-                "last_result": None,
-                "pending": [],
-            },
-        )
-        gateway.update(values)
-        async_dispatcher_send(hass, signal, device_id)
-        callback = data.get(DATA_ADD_ENTITIES)
-        if callback and device_id not in data[DATA_ENTITY_IDS]:
-            from .sensor import XiaomiGatewaySensor
-
-            data[DATA_ENTITY_IDS].add(device_id)
-            callback([XiaomiGatewaySensor(hass, entry, device_id)])
-
-    def register_gateway_device(device_id: str) -> None:
-        """Ensure the shared ESP32 device exists, without creating a second entry."""
-        device = data[DATA_GATEWAYS][device_id]
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
-            name=device.get("name"),
-            manufacturer="Espressif",
-            model=device.get("model", "ESP32"),
-        )
+    def ensure_gateway(device_id: str) -> dict[str, Any]:
+        """Return the runtime state for one gateway."""
+        return _gateway_state(data, device_id)
 
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
-        # The shared Platform Core identity payload predates the Xiaomi v1
-        # protocol and intentionally has no protocol-version field.
+        """Handle the Platform Core gateway identity."""
+        match = re.fullmatch(r"esp32/([0-9A-Fa-f]{12})/device/info", msg.topic)
+        if not match:
+            return
+        topic_id = match.group(1).upper()
         try:
             payload = json.loads(msg.payload)
         except (ValueError, TypeError):
+            _LOGGER.warning("Ignoring invalid ESP32 identity payload")
             return
         if not isinstance(payload, dict):
             return
-        device_id = str(payload.get("id", "")).upper()
-        name = str(payload.get("name", "")).strip()
-        model = str(payload.get("model", "ESP32")).strip() or "ESP32"
-        if not re.fullmatch(DEVICE_ID_RE, device_id) or not name:
+        raw_device_id = payload.get("id")
+        raw_name = payload.get("name")
+        raw_model = payload.get("model", "ESP32")
+        if not isinstance(raw_device_id, str) or not isinstance(raw_name, str):
             _LOGGER.warning("Ignoring invalid ESP32 identity message")
             return
-        update_gateway(device_id, name=name[:64], model=model[:64])
-        register_gateway_device(device_id)
+        device_id = raw_device_id.upper()
+        name = raw_name.strip()
+        model = raw_model.strip() if isinstance(raw_model, str) else "ESP32"
+        if (
+            device_id != topic_id
+            or not DEVICE_ID_RE.fullmatch(device_id)
+            or not name
+        ):
+            _LOGGER.warning("Ignoring invalid ESP32 identity message")
+            return
+        gateway = ensure_gateway(device_id)
+        gateway["identity_received"] = True
+        gateway["name"] = name[:64]
+        gateway["model"] = (model or "ESP32")[:64]
+        # Refresh the shared registry entry with the identity fields.
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
+            name=gateway["name"],
+            model=gateway["model"],
+            manufacturer="Espressif",
+        )
+        _fire_state_updated(hass, device_id)
 
     async def availability_message(msg: mqtt.ReceiveMessage) -> None:
+        """Track gateway availability independently of esp32_ota."""
         match = re.fullmatch(r"esp32/([0-9A-Fa-f]{12})/availability", msg.topic)
         if not match:
             return
-        state = str(msg.payload).strip().lower()
-        if state not in ("online", "offline"):
+        payload = str(msg.payload).strip().lower()
+        if payload not in ("online", "offline"):
+            _LOGGER.warning("Ignoring invalid ESP32 availability payload")
             return
         device_id = match.group(1).upper()
-        if device_id not in data[DATA_GATEWAYS]:
-            return
-        update_gateway(device_id, available=state == "online")
+        gateway = ensure_gateway(device_id)
+        gateway["available"] = payload == "online"
+        _fire_state_updated(hass, device_id)
 
-    async def snapshot_message(msg: mqtt.ReceiveMessage, kind: str) -> None:
+    async def xiaomi_message(msg: mqtt.ReceiveMessage) -> None:
+        """Process retained snapshots and command results for every gateway."""
         match = re.fullmatch(
-            rf"esp32/([0-9A-Fa-f]{{12}})/xiaomi/{kind}", msg.topic
+            r"esp32/([0-9A-Fa-f]{12})/xiaomi/(discovered|registry|command/result)",
+            msg.topic,
         )
         if not match:
             return
         device_id = match.group(1).upper()
-        payload = _decode_payload(msg.payload)
-        if payload is None or not isinstance(payload.get("sensors"), list):
-            _LOGGER.warning("Ignoring invalid Xiaomi %s snapshot from %s", kind, device_id)
-            return
-        # Retained snapshots can be delivered before the retained identity.
-        # Keep them; the later identity message enriches the same gateway.
-        if device_id not in data[DATA_GATEWAYS]:
-            update_gateway(device_id)
-        macs: set[str] = set()
-        for item in payload["sensors"]:
-            if not isinstance(item, dict):
-                continue
-            mac = str(item.get("mac", "")).upper()
-            if re.fullmatch(MAC_RE, mac):
-                macs.add(mac)
-        update_gateway(device_id, **{kind: macs})
-        if kind == "registry":
-            # Keep a successful add reserved until the authoritative retained
-            # registry confirms it, regardless of result/snapshot arrival order.
-            for reserved_mac, owner in list(data[DATA_PENDING_MACS].items()):
-                if owner[0] == device_id and reserved_mac in macs:
-                    data[DATA_PENDING_MACS].pop(reserved_mac, None)
+        message_type = match.group(2)
+        gateway = ensure_gateway(device_id)
 
-    async def discovered_message(msg: mqtt.ReceiveMessage) -> None:
-        await snapshot_message(msg, "discovered")
-
-    async def registry_message(msg: mqtt.ReceiveMessage) -> None:
-        await snapshot_message(msg, "registry")
-
-    def finish_pending(device_id: str, request_id: str, result: str) -> None:
-        key = (device_id, request_id)
-        pending = data[DATA_PENDING].pop(key, None)
-        if pending is None:
-            return
-        cancel = pending.get("cancel")
-        if cancel:
-            cancel()
-        mac = pending["mac"]
-        gateway = data[DATA_GATEWAYS].get(device_id)
-        if pending["action"] == "add":
-            if result in ("success", "already_exists") and (
-                gateway is None or mac not in gateway["registry"]
-            ):
-                data[DATA_PENDING_MACS][mac] = (device_id, "awaiting_registry")
+        if message_type in ("discovered", "registry"):
+            snapshot = _parse_snapshot(msg.payload)
+            if snapshot is None:
+                _LOGGER.warning(
+                    "Ignoring invalid Xiaomi %s snapshot from ESP32 %s",
+                    message_type,
+                    device_id,
+                )
+                return
+            sensors: dict[str, dict[str, Any]] = {}
+            registry: set[str] = set()
+            for item in snapshot["sensors"][:64]:
+                if not isinstance(item, dict):
+                    continue
+                mac = str(item.get("mac", "")).upper()
+                if not MAC_RE.fullmatch(mac):
+                    continue
+                if message_type == "registry":
+                    registry.add(mac)
+                else:
+                    sensor: dict[str, Any] = {"mac": mac}
+                    rssi = item.get("rssi")
+                    if isinstance(rssi, int) and not isinstance(rssi, bool):
+                        sensor["rssi"] = max(-127, min(20, rssi))
+                    sensors[mac] = sensor
+            if message_type == "registry":
+                gateway["registry"] = registry
+                gateway["registry_received"] = True
+                gateway["registry_revision"] += 1
+                for reserved_mac, reservation in list(data[DATA_PENDING_ADDS].items()):
+                    if reserved_mac in registry or (
+                        reservation["device_id"] == device_id
+                        and reservation["state"] == "uncertain"
+                    ) or (
+                        reservation["device_id"] == device_id
+                        and reservation["state"] == "awaiting_registry"
+                        and reservation["registry_revision"] < gateway["registry_revision"]
+                    ):
+                        data[DATA_PENDING_ADDS].pop(reserved_mac, None)
             else:
-                data[DATA_PENDING_MACS].pop(mac, None)
-        if gateway is not None:
-            gateway["pending"] = [
-                item for item in gateway["pending"] if item["request_id"] != request_id
-            ]
-            gateway["last_result"] = {
-                "action": pending["action"],
-                "mac": mac,
-                "result": result,
-            }
-            async_dispatcher_send(hass, signal, device_id)
+                gateway["discovered"] = sensors
+                gateway["discovered_received"] = True
+            _fire_state_updated(hass, device_id)
+            return
 
-    async def result_message(msg: mqtt.ReceiveMessage) -> None:
-        match = re.fullmatch(
-            r"esp32/([0-9A-Fa-f]{12})/xiaomi/command/result", msg.topic
-        )
-        if not match:
+        try:
+            result = json.loads(msg.payload)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Ignoring invalid Xiaomi command result from ESP32 %s", device_id)
             return
-        device_id = match.group(1).upper()
-        payload = _decode_payload(msg.payload)
-        if payload is None:
-            return
-        request_id = payload.get("request_id")
-        action = payload.get("action")
-        result = payload.get("result")
-        mac = str(payload.get("mac", "")).upper()
         if (
-            not isinstance(request_id, str)
-            or action not in ("add", "remove")
-            or not isinstance(result, str)
-            or not re.fullmatch(MAC_RE, mac)
+            not isinstance(result, dict)
+            or type(result.get("version")) is not int
+            or result.get("version") != PROTOCOL_VERSION
         ):
             return
-        pending = data[DATA_PENDING].get((device_id, request_id))
-        if pending is None or pending["action"] != action or pending["mac"] != mac:
+        request_id = result.get("request_id")
+        action = result.get("action")
+        mac = str(result.get("mac", "")).upper()
+        status = result.get("result")
+        if (
+            not isinstance(request_id, str)
+            or not request_id
+            or len(request_id) > MAX_REQUEST_ID_LENGTH
+            or not isinstance(action, str)
+            or action not in ("add", "remove")
+            or not MAC_RE.fullmatch(mac)
+            or not isinstance(status, str)
+            or status not in RESULT_MESSAGES
+        ):
+            _LOGGER.warning("Ignoring malformed Xiaomi command result from ESP32 %s", device_id)
             return
-        finish_pending(device_id, request_id, result)
+        pending = data[DATA_PENDING].get((device_id, request_id))
+        if pending is not None:
+            if pending["action"] != action or pending["mac"] != mac:
+                _LOGGER.warning(
+                    "Ignoring mismatched Xiaomi command result from ESP32 %s",
+                    device_id,
+                )
+                return
+            if not pending["future"].done():
+                pending["future"].set_result(status)
+        hass.bus.async_fire(
+            EVENT_COMMAND_RESULT,
+            {
+                "device_id": device_id,
+                "request_id": request_id,
+                "action": action,
+                "mac": mac,
+                "result": status,
+            },
+        )
 
     data[DATA_UNSUB] = [
         await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
         await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
-        await mqtt.async_subscribe(hass, DISCOVERED_TOPIC, discovered_message, qos=1),
-        await mqtt.async_subscribe(hass, REGISTRY_TOPIC, registry_message, qos=1),
-        await mqtt.async_subscribe(hass, COMMAND_RESULT_TOPIC, result_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
     ]
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    def ensure_gateway(device_id: str) -> dict[str, Any]:
-        if not re.fullmatch(DEVICE_ID_RE, device_id):
-            raise HomeAssistantError("Некорректный ID ESP32-шлюза.")
-        gateway = data[DATA_GATEWAYS].get(device_id)
-        if gateway is None:
-            raise HomeAssistantError(
-                "ESP32-шлюз не обнаружен. Проверьте MQTT и публикацию device/info."
-            )
-        return gateway
-
-    def reserve_operation(
-        device_id: str, action: str, mac: str, request_id: str
+    async def send_command(
+        action: str,
+        device_id_value: str,
+        mac_value: str,
+        bind_key: str | None = None,
     ) -> None:
-        pending = {
+        """Publish one command and wait for its correlated result."""
+        device_id = device_id_value.strip().upper()
+        mac = mac_value.strip().upper()
+        if not DEVICE_ID_RE.fullmatch(device_id):
+            raise HomeAssistantError("Некорректный ID ESP32.")
+        if not MAC_RE.fullmatch(mac):
+            raise HomeAssistantError("Укажите MAC датчика в формате AA:BB:CC:DD:EE:FF.")
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        if gateway is None or not gateway["identity_received"]:
+            raise HomeAssistantError(
+                "ESP32 не обнаружена по MQTT identity. Проверьте MQTT и подключение шлюза."
+            )
+        if action == "add":
+            if not isinstance(bind_key, str) or not BIND_KEY_RE.fullmatch(bind_key):
+                raise HomeAssistantError("Bind-key должен содержать ровно 32 hex-символа.")
+            existing_reservation = data[DATA_PENDING_ADDS].get(mac)
+            if existing_reservation is not None and (
+                existing_reservation["device_id"] != device_id
+                or existing_reservation["state"] not in ("uncertain", "awaiting_registry")
+            ):
+                raise HomeAssistantError(
+                    "Для этого датчика уже выполняется добавление или ожидается синхронизация реестра."
+                )
+            unsynchronized = [
+                item["device_id"]
+                for item in data[DATA_GATEWAYS].values()
+                if item["identity_received"] and not item["registry_received"]
+            ]
+            if unsynchronized:
+                raise HomeAssistantError(
+                    "Реестры всех известных ESP32 ещё не синхронизированы. "
+                    "Дождитесь retained snapshots и повторите попытку."
+                )
+            owner = next(
+                (
+                    item["device_id"]
+                    for item in data[DATA_GATEWAYS].values()
+                    if item["identity_received"] and mac in item["registry"]
+                ),
+                None,
+            )
+            if owner is not None:
+                raise HomeAssistantError(
+                    f"Датчик {mac} уже сохранён на шлюзе {owner}."
+                )
+            data[DATA_PENDING_ADDS][mac] = {
+                "device_id": device_id,
+                "state": "pending",
+                "registry_revision": gateway["registry_revision"],
+            }
+
+        keep_add_reservation = False
+        published = False
+        command_completed = False
+        request_id = uuid.uuid4().hex
+        future: asyncio.Future[str] = hass.loop.create_future()
+        pending_key = (device_id, request_id)
+        data[DATA_PENDING][pending_key] = {
+            "future": future,
             "action": action,
             "mac": mac,
-            "request_id": request_id,
-            "cancel": None,
         }
-        data[DATA_PENDING][(device_id, request_id)] = pending
-        gateway = data[DATA_GATEWAYS][device_id]
-        gateway["pending"].append(
-            {"action": action, "mac": mac, "request_id": request_id}
-        )
-        pending["cancel"] = async_call_later(
-            hass,
-            REQUEST_TIMEOUT,
-            lambda _now: finish_pending(device_id, request_id, "timeout"),
-        )
-        if action == "add":
-            data[DATA_PENDING_MACS][mac] = (device_id, request_id)
-        async_dispatcher_send(hass, signal, device_id)
-
-    async def handle_add(call: ServiceCall) -> None:
-        device_id = str(call.data["device_id"]).upper()
-        mac = str(call.data["mac"]).upper()
-        bind_key = str(call.data["bind_key"])
-        ensure_gateway(device_id)
-        if not re.fullmatch(MAC_RE, mac):
-            raise HomeAssistantError("MAC должен иметь формат AA:BB:CC:DD:EE:FF.")
-        if not re.fullmatch(BIND_KEY_RE, bind_key):
-            raise HomeAssistantError("Bind-key должен содержать ровно 32 шестнадцатеричных символа.")
-        for other_id, gateway in data[DATA_GATEWAYS].items():
-            if mac in gateway["registry"] and other_id != device_id:
-                raise HomeAssistantError(
-                    f"Датчик {mac} уже сохранён на другом ESP32-шлюзе."
-                )
-        reservation = data[DATA_PENDING_MACS].get(mac)
-        if reservation is not None:
-            raise HomeAssistantError("Для этого датчика уже выполняется добавление.")
-        gateway = data[DATA_GATEWAYS][device_id]
-        if mac in gateway["registry"]:
-            raise HomeAssistantError("Датчик уже сохранён на выбранном шлюзе.")
-        request_id = uuid.uuid4().hex
-        reserve_operation(device_id, "add", mac, request_id)
-        command = {
-            "version": VERSION,
+        command: dict[str, Any] = {
+            "version": PROTOCOL_VERSION,
             "request_id": request_id,
             "mac": mac,
-            "bind_key": bind_key,
         }
+        if action == "add":
+            command["bind_key"] = bind_key
+        topic = f"esp32/{device_id}/xiaomi/command/{action}"
         try:
             await mqtt.async_publish(
                 hass,
-                f"esp32/{device_id}/xiaomi/command/add",
+                topic,
                 json.dumps(command, separators=(",", ":")),
                 qos=1,
                 retain=False,
             )
-        except Exception:
-            finish_pending(device_id, request_id, "publish_error")
+            published = True
+            # Do not retain the command or bind-key in integration state.
+            command.clear()
+            status = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
+            command_completed = True
+            if action == "add" and status in ("success", "already_exists"):
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    if mac in gateway["registry"]:
+                        data[DATA_PENDING_ADDS].pop(mac, None)
+                    else:
+                        reservation["state"] = "awaiting_registry"
+                        reservation["registry_revision"] = gateway["registry_revision"]
+                        keep_add_reservation = True
+            elif status != "success":
+                raise HomeAssistantError(RESULT_MESSAGES[status])
+        except asyncio.TimeoutError as err:
+            if action == "add":
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
+            raise HomeAssistantError(
+                "Шлюз не подтвердил команду за отведённое время. "
+                "Дождитесь синхронизации retained registry перед повторной попыткой."
+            ) from err
+        except asyncio.CancelledError:
+            if action == "add" and published:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
             raise
+        except HomeAssistantError:
+            if action == "add" and published and not command_completed:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
+            raise
+        except Exception as err:
+            if action == "add" and published:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
+            raise HomeAssistantError("Не удалось отправить команду ESP32 через MQTT.") from err
         finally:
-            # Do not retain the secret in integration state or logs.
-            command.pop("bind_key", None)
-            bind_key = ""
+            data[DATA_PENDING].pop(pending_key, None)
+            if action == "add" and not keep_add_reservation:
+                data[DATA_PENDING_ADDS].pop(mac, None)
+            if not future.done():
+                future.cancel()
 
-    async def handle_remove(call: ServiceCall) -> None:
-        device_id = str(call.data["device_id"]).upper()
-        mac = str(call.data["mac"]).upper()
-        gateway = ensure_gateway(device_id)
-        if not re.fullmatch(MAC_RE, mac):
-            raise HomeAssistantError("MAC должен иметь формат AA:BB:CC:DD:EE:FF.")
-        if mac not in gateway["registry"]:
-            raise HomeAssistantError("Датчик не найден в реестре выбранного шлюза.")
-        if any(
-            pending["action"] == "remove" and pending["mac"] == mac
-            for pending in data[DATA_PENDING].values()
-        ):
-            raise HomeAssistantError("Для этого датчика уже выполняется удаление.")
-        request_id = uuid.uuid4().hex
-        reserve_operation(device_id, "remove", mac, request_id)
-        command = {"version": VERSION, "request_id": request_id, "mac": mac}
-        try:
-            await mqtt.async_publish(
-                hass,
-                f"esp32/{device_id}/xiaomi/command/remove",
-                json.dumps(command, separators=(",", ":")),
-                qos=1,
-                retain=False,
-            )
-        except Exception:
-            finish_pending(device_id, request_id, "publish_error")
-            raise
+    async def handle_add_sensor(call: ServiceCall) -> None:
+        """Handle add_sensor service calls."""
+        await send_command(
+            "add",
+            str(call.data["device_id"]),
+            str(call.data["mac"]),
+            str(call.data["bind_key"]),
+        )
+
+    async def handle_remove_sensor(call: ServiceCall) -> None:
+        """Handle remove_sensor service calls."""
+        await send_command(
+            "remove",
+            str(call.data["device_id"]),
+            str(call.data["mac"]),
+        )
 
     hass.services.async_register(
         DOMAIN,
-        ADD_SERVICE,
-        handle_add,
+        SERVICE_ADD_SENSOR,
+        handle_add_sensor,
         schema=vol.Schema(
             {
                 vol.Required("device_id"): str,
@@ -354,27 +497,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.services.async_register(
         DOMAIN,
-        REMOVE_SERVICE,
-        handle_remove,
+        SERVICE_REMOVE_SENSOR,
+        handle_remove_sensor,
         schema=vol.Schema(
-            {vol.Required("device_id"): str, vol.Required("mac"): str}
+            {
+                vol.Required("device_id"): str,
+                vol.Required("mac"): str,
+            }
         ),
     )
+
+    if not hass.data[DOMAIN].get("_websocket_registered"):
+        websocket_api.async_register_command(hass, websocket_get_state)
+        hass.data[DOMAIN]["_websocket_registered"] = True
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    data = hass.data[DOMAIN][entry.entry_id]
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if not unload_ok:
-        return False
+    """Unload the integration entry."""
+    data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    for unsubscribe in data.get(DATA_UNSUB, []):
+        unsubscribe()
     for pending in data.get(DATA_PENDING, {}).values():
-        cancel = pending.get("cancel")
-        if cancel:
-            cancel()
-    for unsub in data.get(DATA_UNSUB, []):
-        unsub()
-    hass.data[DOMAIN].pop(entry.entry_id)
-    hass.services.async_remove(DOMAIN, ADD_SERVICE)
-    hass.services.async_remove(DOMAIN, REMOVE_SERVICE)
+        future = pending["future"]
+        if not future.done():
+            future.cancel()
+    hass.services.async_remove(DOMAIN, SERVICE_ADD_SENSOR)
+    hass.services.async_remove(DOMAIN, SERVICE_REMOVE_SENSOR)
     return True
