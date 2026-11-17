@@ -2,7 +2,7 @@
 
 Специализированная интеграция Home Assistant для ESP32-шлюзов с BLE-датчиками Xiaomi LYWSD03MMC.
 
-> Статус: MQTT v1 согласован и реализован в firmware. Этот репозиторий содержит спецификацию и документацию; Python-реализация Home Assistant integration находится на этапе разработки в ветке `feature/xiaomi-ha-integration-v1`.
+> Статус: MQTT v1 реализован в firmware. В ветке `feature/xiaomi-ha-python` добавлен первый backend Python-интеграции: обнаружение шлюзов, общая Device Registry identity, retained snapshots, WebSocket API состояния и add/remove services. Runtime-проверка на Home Assistant ещё не проведена.
 
 ## Назначение и границы ответственности
 
