@@ -272,6 +272,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             or len(request_id) > 64
             or action not in ("add", "remove")
             or not MAC_RE.fullmatch(mac)
+            or not isinstance(action, str)
+            or action not in ("add", "remove")
+            or not isinstance(status, str)
             or status not in RESULT_MESSAGES
         ):
             _LOGGER.warning("Ignoring malformed Xiaomi command result from ESP32 %s", device_id)
