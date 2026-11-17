@@ -263,7 +263,7 @@ Gateway availability is published by the universal Platform Core at `esp32/<DEVI
 ## 12. Security
 
 - The bind-key is sent only in the add command.
-- The bind-key is never stored by the Home Assistant integration or card.
+- The bind-key is never stored by the Home Assistant integration or panel.
 - The bind-key is never included in retained messages.
 - Firmware never logs the key and clears temporary buffers after use.
 - Command topics should be writable only by trusted Home Assistant/clients; gateways read commands and publish their own state.
