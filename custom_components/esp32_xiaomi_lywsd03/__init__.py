@@ -8,6 +8,7 @@ import re
 import uuid
 from typing import Any
 
+import probatio
 import voluptuous as vol
 from homeassistant.components import mqtt, websocket_api
 from homeassistant.config_entries import ConfigEntry
@@ -94,7 +95,7 @@ def _parse_snapshot(payload: str | bytes) -> dict[str, Any] | None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/get_state"}
+    {probatio.Required("type"): f"{DOMAIN}/get_state"}
 )
 @websocket_api.async_response
 async def websocket_get_state(
