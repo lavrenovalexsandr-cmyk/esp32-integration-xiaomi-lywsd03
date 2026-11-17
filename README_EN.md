@@ -15,7 +15,7 @@ A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC
 
 Configure the standard Home Assistant **MQTT** integration separately and make sure the broker is connected to the ESP32 gateways. This integration reuses the configured MQTT connection; it does not need broker credentials in its own config flow.
 
-HACS installation requires a published GitHub Release whose tag matches the version in `manifest.json`. Before the first release, you can test manually by copying `custom_components/esp32_xiaomi_lywsd03` into `config/custom_components/`.
+A GitHub Release is not required for installation as a Custom repository: if there are no releases, HACS uses the short hash of the latest commit as the version. For regular versioned updates, publishing a GitHub Release with a tag aligned with `manifest.json` is recommended. You can also test manually by copying `custom_components/esp32_xiaomi_lywsd03` into `config/custom_components/`.
 
 ## Gateway entity and card data
 
