@@ -2,7 +2,33 @@
 
 Специализированная интеграция Home Assistant для ESP32-шлюзов с BLE-датчиками Xiaomi LYWSD03MMC.
 
-> Статус: MQTT v1 согласован и реализован в firmware. Этот репозиторий содержит спецификацию и документацию; Python-реализация Home Assistant integration находится на этапе разработки в ветке `feature/xiaomi-ha-integration-v1`.
+> Статус: первая версия Python-интеграции реализована в `custom_components/esp32_xiaomi_lywsd03` и подготовлена для установки через HACS. Требуется проверка в реальном Home Assistant с MQTT-брокером и ESP32 firmware.
+
+## Установка через HACS
+
+1. Откройте **HACS → Integrations**.
+2. Откройте меню в правом верхнем углу и выберите **Custom repositories**.
+3. Добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03` с категорией **Integration**.
+4. Найдите **ESP32 Xiaomi LYWSD03MMC** и установите интеграцию.
+5. Перезапустите Home Assistant.
+6. В **Settings → Devices & services → Add integration** найдите **ESP32 Xiaomi LYWSD03MMC** и добавьте её.
+
+Отдельно настройте штатную интеграцию **MQTT** в Home Assistant и убедитесь, что брокер подключён к ESP32. Xiaomi-интеграция использует уже настроенное MQTT-подключение и не требует адреса брокера или учётных данных в своей конфигурации.
+
+Для установки через HACS нужен опубликованный GitHub Release с тегом, совпадающим с версией в `manifest.json`. До первого стабильного релиза репозиторий можно проверять вручную, скопировав каталог `custom_components/esp32_xiaomi_lywsd03` в `config/custom_components/`.
+
+## Сущность шлюза и данные для карточки
+
+Для каждого обнаруженного ESP32 создаётся одна служебная сущность `sensor.<gateway>_xiaomi_sensors` в общей записи устройства ESP32. Она не является сущностью измерений Xiaomi. Атрибуты:
+
+- `device_id` — стабильный ID шлюза;
+- `available` — последнее состояние availability;
+- `discovered` — список обнаруженных MAC;
+- `registry` — список сохранённых MAC;
+- `pending` — ожидающие команды;
+- `last_result` — результат последней завершившейся команды.
+
+Измерения температуры, влажности и батареи по-прежнему создаются firmware через MQTT Discovery.
 
 ## Назначение и границы ответственности
 
@@ -117,12 +143,11 @@ UI находится в репозитории [esp32-card](https://github.com/
 
 ## Этапы реализации
 
-1. Реализовать основу HA-интеграции и подписки на MQTT v1.
-2. Реализовать раздельное состояние snapshots для каждого шлюза и восстановление после reconnect.
-3. Реализовать безопасные add/remove services и корреляцию command/result.
-4. Реализовать межшлюзовую блокировку MAC с учётом retained registry известных шлюзов.
-5. Реализовать Xiaomi Sensor Manager card.
-6. Проверить несколько шлюзов, offline/reconnect, повторную доставку QoS 1 и Areas.
+1. Основа HA-интеграции, config flow и подписки на MQTT v1 — реализованы.
+2. Раздельное состояние snapshots по шлюзам и восстановление из retained snapshots — реализованы.
+3. Add/remove services, проверка MAC между шлюзами и корреляция command/result — реализованы.
+4. Xiaomi Sensor Manager card — отдельная задача в репозитории esp32-card.
+5. Требуется эксплуатационная проверка нескольких шлюзов, offline/reconnect, повторной доставки QoS 1 и Areas.
 
 ## Связанные проекты
 
