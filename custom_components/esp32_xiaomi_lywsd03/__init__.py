@@ -364,14 +364,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    data = hass.data[DOMAIN].pop(entry.entry_id, {})
+    data = hass.data[DOMAIN][entry.entry_id]
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
     for pending in data.get(DATA_PENDING, {}).values():
         cancel = pending.get("cancel")
         if cancel:
             cancel()
     for unsub in data.get(DATA_UNSUB, []):
         unsub()
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    hass.data[DOMAIN].pop(entry.entry_id)
     hass.services.async_remove(DOMAIN, ADD_SERVICE)
     hass.services.async_remove(DOMAIN, REMOVE_SERVICE)
-    return unload_ok
+    return True
