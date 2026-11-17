@@ -266,8 +266,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (ValueError, TypeError):
             _LOGGER.warning("Ignoring invalid Xiaomi command result from ESP32 %s", device_id)
             return
-        if not isinstance(result, dict) or type(result.get("version")) is not int
-            or result.get("version") != PROTOCOL_VERSION:
+        if (
+            not isinstance(result, dict)
+            or type(result.get("version")) is not int
+            or result.get("version") != PROTOCOL_VERSION
+        ):
             return
         request_id = result.get("request_id")
         action = result.get("action")
