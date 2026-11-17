@@ -34,7 +34,7 @@ from .const import (
     PROTOCOL_VERSION,
     SERVICE_ADD_SENSOR,
     SERVICE_REMOVE_SENSOR,
-    XIAOMI_TOPIC,
+    XIAOMI_TOPICS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -309,7 +309,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data[DATA_UNSUB] = [
         await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
         await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
-        await mqtt.async_subscribe(hass, XIAOMI_TOPIC, xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
     ]
 
     async def send_command(
