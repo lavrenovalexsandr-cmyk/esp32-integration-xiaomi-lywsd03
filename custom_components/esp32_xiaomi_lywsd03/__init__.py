@@ -31,6 +31,7 @@ from .const import (
     EVENT_STATE_UPDATED,
     IDENTITY_TOPIC,
     MAC_PATTERN,
+    MAX_REQUEST_ID_LENGTH,
     PROTOCOL_VERSION,
     SERVICE_ADD_SENSOR,
     SERVICE_REMOVE_SENSOR,
@@ -88,6 +89,7 @@ def _parse_snapshot(payload: str | bytes) -> dict[str, Any] | None:
         return None
     if (
         not isinstance(parsed, dict)
+        or type(parsed.get("version")) is not int
         or parsed.get("version") != PROTOCOL_VERSION
         or not isinstance(parsed.get("sensors"), list)
     ):
@@ -146,7 +148,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_GATEWAYS: {},
         DATA_UNSUB: [],
         DATA_PENDING: {},
-        DATA_PENDING_ADDS: set(),
+        DATA_PENDING_ADDS: {},
         "entry": entry,
     }
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
@@ -154,16 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def ensure_gateway(device_id: str) -> dict[str, Any]:
         """Register the shared ESP32 device and return its runtime state."""
-        gateway = _gateway_state(data, device_id)
-        if gateway["identity_received"]:
-            device_registry.async_get_or_create(
-                config_entry_id=entry.entry_id,
-                identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
-                name=gateway["name"],
-                model=gateway["model"],
-                manufacturer="Espressif",
-            )
-        return gateway
+        return _gateway_state(data, device_id)
 
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
         """Handle the Platform Core gateway identity."""
@@ -198,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
             name=gateway["name"],
             model=gateway["model"],
-            manufacturer="ESP32",
+            manufacturer="Espressif",
         )
         _fire_state_updated(hass, device_id)
 
@@ -273,7 +266,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (ValueError, TypeError):
             _LOGGER.warning("Ignoring invalid Xiaomi command result from ESP32 %s", device_id)
             return
-        if not isinstance(result, dict) or result.get("version") != PROTOCOL_VERSION:
+        if not isinstance(result, dict) or type(result.get("version")) is not int
+            or result.get("version") != PROTOCOL_VERSION:
             return
         request_id = result.get("request_id")
         action = result.get("action")
@@ -282,7 +276,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if (
             not isinstance(request_id, str)
             or not request_id
-            or len(request_id) > 64
+            or len(request_id) > MAX_REQUEST_ID_LENGTH
             or not isinstance(action, str)
             or action not in ("add", "remove")
             or not MAC_RE.fullmatch(mac)
