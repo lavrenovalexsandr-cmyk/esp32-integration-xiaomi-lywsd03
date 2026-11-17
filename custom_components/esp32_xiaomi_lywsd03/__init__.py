@@ -6,8 +6,8 @@ import json
 import logging
 import math
 import re
-from pathlib import Path
 import uuid
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -38,6 +38,7 @@ from .const import (
     IDENTITY_TOPIC,
     MEASUREMENTS_TOPIC,
     MAC_PATTERN,
+    MAX_SENSORS_PER_GATEWAY,
     MAX_REQUEST_ID_LENGTH,
     PROTOCOL_VERSION,
     PANEL_STATIC_URL,
@@ -45,7 +46,6 @@ from .const import (
     PANEL_WEB_COMPONENT,
     SERVICE_ADD_SENSOR,
     SERVICE_REMOVE_SENSOR,
-    XIAOMI_DEVICE_IDENTIFIER_NAMESPACE,
     XIAOMI_TOPICS,
 )
 from .sensor import async_reconcile_gateway, async_write_sensor_state
@@ -366,14 +366,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Ignoring unsupported Xiaomi measurement payload from ESP32 %s", device_id)
             return
 
+        existing = data[DATA_MEASUREMENTS].get(key)
+        if existing is None and sum(
+            sensor_key[0] == device_id for sensor_key in data[DATA_MEASUREMENTS]
+        ) >= MAX_SENSORS_PER_GATEWAY:
+            _LOGGER.warning(
+                "Ignoring Xiaomi measurement beyond the %s-sensor cache limit for ESP32 %s",
+                MAX_SENSORS_PER_GATEWAY,
+                device_id,
+            )
+            return
+
         values: dict[str, int | float] = {}
         temperature = payload.get("temperature")
-        if (
-            isinstance(temperature, (int, float))
-            and not isinstance(temperature, bool)
-            and math.isfinite(temperature)
-        ):
-            values["temperature"] = temperature
+        if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
+            try:
+                if math.isfinite(float(temperature)):
+                    values["temperature"] = temperature
+            except (OverflowError, ValueError):
+                pass
         humidity = payload.get("humidity")
         if (
             isinstance(humidity, (int, float))
@@ -386,9 +397,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if type(battery) is int and 0 <= battery <= 100:
             values["battery"] = battery
 
-        if not values:
-            _LOGGER.debug("Xiaomi measurement message has no valid values for %s", mac)
-            return
         data[DATA_MEASUREMENTS][key] = values
         async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
