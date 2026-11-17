@@ -5,7 +5,7 @@ DEVICE_IDENTIFIER_NAMESPACE = "esp32"
 
 IDENTITY_TOPIC = "esp32/+/device/info"
 AVAILABILITY_TOPIC = "esp32/+/availability"
-XIAOMI_TOPIC = "esp32/+/xiaomi/+"
+XIAOMI_TOPIC = "esp32/+/xiaomi/#"
 
 PROTOCOL_VERSION = 1
 COMMAND_TIMEOUT = 30
