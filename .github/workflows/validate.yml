@@ -1,0 +1,25 @@
+name: Validate integration
+
+on:
+  push:
+    branches:
+      - main
+      - feature/xiaomi-ha-integration-v1
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python -m compileall -q custom_components/esp32_xiaomi_lywsd03
+      - name: Validate HACS structure
+        uses: hacs/action@main
+        with:
+          category: integration
+          # Repository metadata and license are intentionally pending maintainer setup.
+          ignore: description topics license
+      - name: Validate Home Assistant manifests
+        uses: home-assistant/actions/hassfest@master
