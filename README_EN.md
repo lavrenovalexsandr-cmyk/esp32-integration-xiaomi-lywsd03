@@ -42,7 +42,7 @@ Responsibilities:
 - **This Xiaomi integration:** MQTT snapshot handling, per-gateway state, global enforcement of the one-MAC/one-gateway rule, add/remove services and secure bind-key forwarding.
 - **Lovelace card:** gateway/sensor selection and calls to this integration's services. The card does not publish MQTT directly or store bind-keys.
 
-The Xiaomi integration must not create duplicate gateway devices, sensor devices or sensor entities. Firmware publishes sensor devices and their three entities through Platform Core's standard MQTT Discovery.
+The Xiaomi integration does not create sensor devices or duplicate their measurement entities: the three entities for each sensor are created by firmware through Platform Core's standard MQTT Discovery. For the manager UI, the integration adds only one gateway-level helper entity exposing snapshots and pending commands.
 
 ## Shared ESP32 gateway identity
 
