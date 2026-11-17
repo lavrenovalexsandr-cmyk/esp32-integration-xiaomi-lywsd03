@@ -42,7 +42,7 @@ Responsibilities:
 - **This Xiaomi integration:** MQTT snapshot handling, per-gateway state, global enforcement of the one-MAC/one-gateway rule, add/remove services and secure bind-key forwarding.
 - **Lovelace card:** gateway/sensor selection and calls to this integration's services. The card does not publish MQTT directly or store bind-keys.
 
-The Xiaomi integration does not create sensor devices or duplicate their measurement entities: the three entities for each sensor are created by firmware through Platform Core's standard MQTT Discovery. For the manager UI, the integration adds only one gateway-level helper entity exposing snapshots and pending commands.
+The Xiaomi integration does not create sensor devices or duplicate their measurement entities: the three entities for each sensor are created by firmware through Platform Core's standard MQTT Discovery. For the manager UI, the integration provides a WebSocket state API and update events.
 
 ## Shared ESP32 gateway identity
 
@@ -143,12 +143,12 @@ After removal, a sensor remains in the combined list if it is still discovered; 
 
 ## Implementation stages
 
-1. Implement the HA integration foundation and MQTT v1 subscriptions.
-2. Implement per-gateway snapshot state and reconnect recovery.
-3. Implement secure add/remove services and command-result correlation.
-4. Implement cross-gateway MAC locking using retained registries of known gateways.
-5. Implement the Xiaomi Sensor Manager card.
-6. Verify multiple gateways, offline/reconnect, QoS 1 redelivery and Areas.
+1. HA integration foundation, config flow and MQTT v1 subscriptions — implemented.
+2. Per-gateway snapshot state and recovery from retained snapshots — implemented.
+3. Add/remove services, validation, command-result correlation and cross-gateway MAC locking — implemented.
+4. WebSocket state API and events for the Xiaomi Sensor Manager — implemented.
+5. Xiaomi Sensor Manager card — tracked separately in the esp32-card repository.
+6. Runtime verification with multiple gateways, offline/reconnect, QoS 1 redelivery and Areas remains.
 
 ## Related projects
 
