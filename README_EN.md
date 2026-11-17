@@ -68,16 +68,9 @@ Room assignment is not sent over MQTT or stored in firmware. Users assign the se
 
 ## MQTT contract
 
-Before implementing handlers, agree on:
-- gateway discovery and availability;
-- BLE sensor discovery and discovery expiry;
-- saved sensor registry publication;
-- add/remove commands and response correlation;
-- measurements and sensor availability;
-- unique topic namespaces for multiple gateways;
-- connection-loss and gateway-restart behavior.
+The MQTT v1 contract has been agreed and documented separately: [docs/MQTT_PROTOCOL_EN.md](docs/MQTT_PROTOCOL_EN.md). Russian version: [docs/MQTT_PROTOCOL_RU.md](docs/MQTT_PROTOCOL_RU.md).
 
-This overview does not define final topics or payloads. A detailed specification will be added to docs/MQTT_PROTOCOL_EN.md before handlers are implemented.
+The specification defines topics and payloads, retained snapshots of discovered and saved sensors, add/remove commands, command results, measurements, the one-gateway-per-MAC rule, reconnect behavior and current Platform Core limitations. Firmware and Home Assistant integration must be implemented against this contract.
 
 ## Lovelace card
 
