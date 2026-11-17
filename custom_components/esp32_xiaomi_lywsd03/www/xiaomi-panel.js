@@ -157,7 +157,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     }
     sensorSelect.replaceChildren();
     for (const item of options) {
-      const status = item.saved ? "Save" : "New";
+      const status = !gateway?.registry_received ? "…" : (item.saved ? "Save" : "New");
       const rssi = Number.isInteger(item.rssi) ? ` · RSSI ${item.rssi} dBm` : "";
       sensorSelect.add(new Option(`${item.mac} — ${status}${rssi}`, item.mac));
     }
@@ -174,15 +174,17 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const selected = this._sensorOptions(gateway).find((item) => item.mac === this._selectedMac);
     const saved = Boolean(selected?.saved);
     this.shadowRoot.getElementById("sensor-status").textContent = selected
-      ? (saved ? "Статус: Save — датчик сохранён на шлюзе" : "Статус: New — датчик обнаружен, но не сохранён")
+      ? (!gateway?.registry_received
+          ? "Ожидается синхронизация реестра шлюза."
+          : (saved ? "Статус: Save — датчик сохранён на шлюзе" : "Статус: New — датчик обнаружен, но не сохранён"))
       : "Нет доступных датчиков. Убедитесь, что шлюз обнаруживает BLE-рекламу.";
     this.shadowRoot.getElementById("key-row").hidden = saved || !selected;
     this.shadowRoot.getElementById("add").hidden = saved || !selected;
     this.shadowRoot.getElementById("remove").hidden = !saved;
     this.shadowRoot.getElementById("gateway").disabled = this._gateways.length === 0;
     this.shadowRoot.getElementById("sensor").disabled = !selected;
-    this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available;
-    this.shadowRoot.getElementById("remove").disabled = this._busy || !saved || !gateway?.available;
+    this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available || !gateway?.registry_received;
+    this.shadowRoot.getElementById("remove").disabled = this._busy || !saved || !gateway?.available || !gateway?.registry_received;
   }
 
   async _addSensor() {
@@ -193,6 +195,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       this._showMessage("Bind Key должен содержать ровно 32 шестнадцатеричных символа.", true);
       return;
     }
+    this.shadowRoot.getElementById("bind-key").value = "";
     this._setBusy(true);
     try {
       await this._hass.callService("esp32_xiaomi_lywsd03", "add_sensor", {
@@ -200,7 +203,6 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         mac: this._selectedMac,
         bind_key: bindKey
       });
-      this.shadowRoot.getElementById("bind-key").value = "";
       this._showMessage("Команда добавления подтверждена шлюзом.", false);
       await this._loadState();
     } catch (error) {
