@@ -19,5 +19,7 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+          # Repository metadata and license are intentionally pending maintainer setup.
+          ignore: description topics license
       - name: Validate Home Assistant manifests
         uses: home-assistant/actions/hassfest@master
