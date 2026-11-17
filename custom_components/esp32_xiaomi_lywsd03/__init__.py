@@ -119,7 +119,7 @@ async def websocket_get_state(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return gateway snapshots to the Xiaomi Sensor Manager card."""
+    """Return gateway snapshots to the Xiaomi Sensor Manager panel."""
     entries = hass.data.get(DOMAIN, {})
     data = next(
         (value for key, value in entries.items() if not key.startswith("_")),
