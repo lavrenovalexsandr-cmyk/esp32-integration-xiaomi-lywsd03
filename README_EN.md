@@ -117,12 +117,12 @@ After removal, a sensor remains in the combined list if it is still discovered; 
 
 ## Implementation stages
 
-1. Implement the HA integration foundation and MQTT v1 subscriptions.
-2. Implement per-gateway snapshot state and reconnect recovery.
-3. Implement secure add/remove services and command-result correlation.
-4. Implement cross-gateway MAC locking using retained registries of known gateways.
-5. Implement the Xiaomi Sensor Manager card.
-6. Verify multiple gateways, offline/reconnect, QoS 1 redelivery and Areas.
+1. **HA backend and MQTT v1 — implemented in the working branch.** Identity discovery, shared Device Registry entry, availability and snapshot/result subscriptions.
+2. **Gateway state and reconnect — implemented in the working branch.** Retained snapshots are processed separately for each gateway.
+3. **Add/remove services — implemented in the working branch.** Validation, non-retained commands, request/result correlation, timeout and safe bind-key handling.
+4. **Cross-gateway MAC locking — implemented in the working branch.** Adds are blocked until registries of all known gateways are synchronized; reservations remain until the updated registry confirms the add.
+5. **Xiaomi Sensor Manager card — next stage.** The backend already exposes the esp32_xiaomi_lywsd03/get_state WebSocket command and state update events.
+6. **Runtime validation — pending Home Assistant installation.** Verify multiple gateways, offline/reconnect, QoS 1 redelivery, add/remove and Areas.
 
 ## Related projects
 
