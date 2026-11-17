@@ -2,7 +2,7 @@
 
 A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC BLE sensors.
 
-> Status: MQTT v1 is agreed and implemented in firmware. This repository contains the specification and documentation; the Home Assistant Python integration is being developed in branch `feature/xiaomi-ha-integration-v1`.
+> Status: MQTT v1 is implemented in firmware. The `feature/xiaomi-ha-python` branch now contains the first Python backend: gateway discovery, shared Device Registry identity, retained snapshots, a state WebSocket API, and add/remove services. Runtime validation in Home Assistant is still pending.
 
 ## Purpose and responsibility boundaries
 
