@@ -1,0 +1,44 @@
+add_sensor:
+  name: Add Xiaomi sensor
+  description: Save a Xiaomi LYWSD03MMC sensor on one ESP32 gateway.
+  fields:
+    device_id:
+      name: ESP32 device ID
+      description: Stable 12-character gateway ID from MQTT identity.
+      required: true
+      example: "A1B2C3D4E5F6"
+      selector:
+        text:
+    mac:
+      name: Sensor MAC
+      description: Sensor MAC address.
+      required: true
+      example: "A4:C1:38:12:34:56"
+      selector:
+        text:
+    bind_key:
+      name: Bind key
+      description: 32 hexadecimal characters. It is sent directly to the selected gateway and is not stored by Home Assistant.
+      required: true
+      selector:
+        text:
+          type: password
+
+remove_sensor:
+  name: Remove Xiaomi sensor
+  description: Remove a saved Xiaomi LYWSD03MMC sensor from an ESP32 gateway.
+  fields:
+    device_id:
+      name: ESP32 device ID
+      description: Stable 12-character gateway ID from MQTT identity.
+      required: true
+      example: "A1B2C3D4E5F6"
+      selector:
+        text:
+    mac:
+      name: Sensor MAC
+      description: Sensor MAC address.
+      required: true
+      example: "A4:C1:38:12:34:56"
+      selector:
+        text:
