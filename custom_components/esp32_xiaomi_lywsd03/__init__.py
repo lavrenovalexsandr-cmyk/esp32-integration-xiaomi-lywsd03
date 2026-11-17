@@ -377,7 +377,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return
 
-        values: dict[str, int | float] = {}
+        values: dict[str, int | float] = dict(existing or {})
         temperature = payload.get("temperature")
         if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
             try:
@@ -389,10 +389,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if (
             isinstance(humidity, (int, float))
             and not isinstance(humidity, bool)
-            and math.isfinite(humidity)
             and 0 <= humidity <= 100
         ):
-            values["humidity"] = humidity
+            try:
+                if math.isfinite(float(humidity)):
+                    values["humidity"] = humidity
+            except (OverflowError, ValueError):
+                pass
         battery = payload.get("battery")
         if type(battery) is int and 0 <= battery <= 100:
             values["battery"] = battery
