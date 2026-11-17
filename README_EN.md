@@ -56,7 +56,7 @@ identifiers={("esp32", device_id)}
 
 Here, `esp32` is the platform-wide namespace and `device_id` is the stable ID from MQTT identity. The gateway name and model must come from the same MQTT identity fields (`name` and `model`) so integrations expose consistent device information.
 
-**Xiaomi integration implementation task:** obtain gateway MQTT identity independently and use `("esp32", device_id)` when registering/enriching the gateway device. Do not use `("esp32_ota", device_id)` or rely on `esp32_ota` being installed. Xiaomi services continue to accept the stable `device_id`.
+**Implementation:** the integration obtains gateway MQTT identity independently and uses `("esp32", device_id)` when registering/enriching the gateway device. It does not use `("esp32_ota", device_id)` or rely on `esp32_ota` being installed. Xiaomi services accept the stable `device_id`.
 
 ## Features
 
