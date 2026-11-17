@@ -67,6 +67,7 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "discovered": {},
         "registry": set(),
         "registry_received": False,
+        "registry_revision": 0,
         "discovered_received": False,
     }
 
@@ -249,10 +250,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if message_type == "registry":
                 gateway["registry"] = registry
                 gateway["registry_received"] = True
+                gateway["registry_revision"] += 1
                 for reserved_mac, reservation in list(data[DATA_PENDING_ADDS].items()):
                     if reserved_mac in registry or (
                         reservation["device_id"] == device_id
                         and reservation["state"] == "uncertain"
+                    ) or (
+                        reservation["device_id"] == device_id
+                        and reservation["state"] == "awaiting_registry"
+                        and reservation["registry_revision"] < gateway["registry_revision"]
                     ):
                         data[DATA_PENDING_ADDS].pop(reserved_mac, None)
             else:
@@ -367,6 +373,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data[DATA_PENDING_ADDS][mac] = {
                 "device_id": device_id,
                 "state": "pending",
+                "registry_revision": gateway["registry_revision"],
             }
 
         keep_add_reservation = False
@@ -401,6 +408,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 reservation = data[DATA_PENDING_ADDS].get(mac)
                 if reservation is not None:
                     reservation["state"] = "awaiting_registry"
+                    reservation["registry_revision"] = gateway["registry_revision"]
                     keep_add_reservation = True
             elif status != "success":
                 raise HomeAssistantError(RESULT_MESSAGES[status])
