@@ -155,8 +155,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
     device_registry = dr.async_get(hass)
 
-    async def ensure_gateway(device_id: str) -> dict[str, Any]:
-        """Register the shared ESP32 device and return its runtime state."""
+    def ensure_gateway(device_id: str) -> dict[str, Any]:
+        """Return the runtime state for one gateway."""
         return _gateway_state(data, device_id)
 
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
@@ -172,9 +172,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         if not isinstance(payload, dict):
             return
-        device_id = str(payload.get("id", "")).upper()
-        name = str(payload.get("name", "")).strip()
-        model = str(payload.get("model", "ESP32")).strip()
+        raw_device_id = payload.get("id")
+        raw_name = payload.get("name")
+        raw_model = payload.get("model", "ESP32")
+        if not isinstance(raw_device_id, str) or not isinstance(raw_name, str):
+            _LOGGER.warning("Ignoring invalid ESP32 identity message")
+            return
+        device_id = raw_device_id.upper()
+        name = raw_name.strip()
+        model = raw_model.strip() if isinstance(raw_model, str) else "ESP32"
         if (
             device_id != topic_id
             or not DEVICE_ID_RE.fullmatch(device_id)
@@ -182,7 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ):
             _LOGGER.warning("Ignoring invalid ESP32 identity message")
             return
-        gateway = await ensure_gateway(device_id)
+        gateway = ensure_gateway(device_id)
         gateway["identity_received"] = True
         gateway["name"] = name[:64]
         gateway["model"] = (model or "ESP32")[:64]
