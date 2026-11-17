@@ -136,12 +136,6 @@ async def websocket_get_state(
     connection.send_result(msg["id"], {"gateways": gateways})
 
 
-async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Set up the integration domain."""
-    hass.data.setdefault(DOMAIN, {})
-    return True
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Xiaomi integration entry."""
     data: dict[str, Any] = {
