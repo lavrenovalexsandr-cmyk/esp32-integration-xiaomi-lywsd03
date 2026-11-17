@@ -377,6 +377,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             }
 
         keep_add_reservation = False
+        published = False
+        command_completed = False
         request_id = uuid.uuid4().hex
         future: asyncio.Future[str] = hass.loop.create_future()
         pending_key = (device_id, request_id)
@@ -401,9 +403,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 qos=1,
                 retain=False,
             )
+            published = True
             # Do not retain the command or bind-key in integration state.
             command.clear()
             status = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
+            command_completed = True
             if status == "success" and action == "add":
                 reservation = data[DATA_PENDING_ADDS].get(mac)
                 if reservation is not None:
@@ -422,9 +426,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Шлюз не подтвердил команду за отведённое время. "
                 "Дождитесь синхронизации retained registry перед повторной попыткой."
             ) from err
+        except asyncio.CancelledError:
+            if action == "add" and published:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
+            raise
         except HomeAssistantError:
+            if action == "add" and published and not command_completed:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
             raise
         except Exception as err:
+            if action == "add" and published:
+                reservation = data[DATA_PENDING_ADDS].get(mac)
+                if reservation is not None:
+                    reservation["state"] = "uncertain"
+                    keep_add_reservation = True
             raise HomeAssistantError("Не удалось отправить команду ESP32 через MQTT.") from err
         finally:
             data[DATA_PENDING].pop(pending_key, None)
