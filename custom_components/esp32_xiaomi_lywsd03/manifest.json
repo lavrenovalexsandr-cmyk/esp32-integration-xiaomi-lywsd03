@@ -1,16 +1,16 @@
 {
   "domain": "esp32_xiaomi_lywsd03",
   "name": "ESP32 Xiaomi LYWSD03MMC",
-  "version": "0.1.0",
-  "documentation": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03",
-  "issue_tracker": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03/issues",
-  "dependencies": [
-    "mqtt"
-  ],
   "codeowners": [
     "@lavrenovalexsandr-cmyk"
   ],
-  "iot_class": "local_push",
   "config_flow": true,
-  "integration_type": "hub"
+  "dependencies": [
+    "mqtt"
+  ],
+  "documentation": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03/issues",
+  "version": "0.1.0"
 }
