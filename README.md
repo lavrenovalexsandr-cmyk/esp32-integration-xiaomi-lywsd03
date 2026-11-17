@@ -117,12 +117,12 @@ UI находится в репозитории [esp32-card](https://github.com/
 
 ## Этапы реализации
 
-1. Реализовать основу HA-интеграции и подписки на MQTT v1.
-2. Реализовать раздельное состояние snapshots для каждого шлюза и восстановление после reconnect.
-3. Реализовать безопасные add/remove services и корреляцию command/result.
-4. Реализовать межшлюзовую блокировку MAC с учётом retained registry известных шлюзов.
-5. Реализовать Xiaomi Sensor Manager card.
-6. Проверить несколько шлюзов, offline/reconnect, повторную доставку QoS 1 и Areas.
+1. **Backend HA и MQTT v1 — реализовано в рабочей ветке.** Обнаружение identity, shared Device Registry, availability и подписки на snapshots/result.
+2. **Состояние шлюзов и reconnect — реализовано в рабочей ветке.** Retained snapshots обрабатываются отдельно для каждого шлюза.
+3. **Add/remove services — реализовано в рабочей ветке.** Валидация, retain=false, request/result correlation, тайм-аут и безопасная обработка bind-key.
+4. **Межшлюзовая блокировка MAC — реализовано в рабочей ветке.** Добавление блокируется до синхронизации реестров всех известных шлюзов; резервирование сохраняется до подтверждения обновлённого registry.
+5. **Xiaomi Sensor Manager card — следующий этап.** Backend уже предоставляет WebSocket esp32_xiaomi_lywsd03/get_state и события обновления.
+6. **Runtime-проверка — ожидает установки в HA.** Проверить несколько шлюзов, offline/reconnect, QoS 1 redelivery, add/remove и Areas.
 
 ## Связанные проекты
 
