@@ -6,12 +6,13 @@ A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC
 
 ## Purpose and responsibility boundaries
 
-This integration handles Xiaomi-specific operations and coordination across multiple ESP32 gateways. Generic ESP32 management (OTA, Restart, Factory Reset and base identity) remains in the universal `esp32_ota` integration and Platform Core.
+This integration handles Xiaomi-specific operations and coordination across multiple ESP32 gateways. Generic ESP32 management (OTA, Restart and Factory Reset) remains in the universal `esp32_ota` integration; base gateway identity belongs to Platform Core and the shared MQTT contract.
 
 Responsibilities:
 
 - **Firmware / Platform Core:** BLE discovery, bind-key storage in NVS, MQTT v1, retained snapshots and measurements, and Home Assistant MQTT Discovery for sensors.
-- **Universal `esp32_ota` integration:** ESP32 gateway discovery, gateway HA device-registry entries and availability.
+- **Universal `esp32_ota` integration:** OTA and generic device-control commands; it also uses the shared gateway device entry but is not required by the Xiaomi integration.
+- **Shared MQTT contract / Platform Core:** stable gateway identity and its base information.
 - **This Xiaomi integration:** MQTT snapshot handling, per-gateway state, global enforcement of the one-MAC/one-gateway rule, add/remove services and secure bind-key forwarding.
 - **Lovelace card:** gateway/sensor selection and calls to this integration's services. The card does not publish MQTT directly or store bind-keys.
 
@@ -52,7 +53,7 @@ Services:
 
 Fields for `add_sensor`:
 
-- `device_id` — stable ID of the selected ESP32 gateway from the universal `esp32_ota` integration;
+- `device_id` — stable ID of the selected ESP32 gateway from MQTT identity;
 - `mac` — sensor MAC in `AA:BB:CC:DD:EE:FF` format;
 - `bind_key` — exactly 32 hexadecimal characters (16 bytes).
 
@@ -61,7 +62,7 @@ Fields for `remove_sensor`:
 - `device_id` — stable ID of the selected ESP32 gateway;
 - `mac` — sensor MAC.
 
-The service field is named `device_id` to match existing `esp32_ota` services and the card integration contract. The gateway ID is not the sensor MAC.
+The service uses the stable `device_id` from MQTT identity. It matches the ID used by `esp32_ota` services, but the Xiaomi integration does not depend on that integration being installed. The gateway ID is not the sensor MAC.
 
 ## Sensor state
 
@@ -76,7 +77,7 @@ Snapshots are always kept separately by gateway device ID. A MAC may be discover
 
 ## Home Assistant devices and Areas
 
-Each gateway is already registered by the universal `esp32_ota` integration. Firmware uses Platform Core MQTT Discovery to create a separate HA device for each Xiaomi sensor and three entities: temperature, humidity and battery. Unknown measurements remain `unknown` until the sensor reports them.
+The Xiaomi integration obtains gateway MQTT identity independently and uses the shared Device Registry identifier `("esp32", device_id)`. If `esp32_ota` is installed, both integrations enrich the same gateway entry rather than creating separate devices. Firmware uses Platform Core MQTT Discovery to create a separate HA device for each Xiaomi sensor and three entities: temperature, humidity and battery. Unknown measurements remain `unknown` until the sensor reports them.
 
 The current Platform Core implementation does not emit `via_device`, so no parent relationship between sensor and gateway is created in the device registry. The Xiaomi integration must not invent a parallel relationship mechanism.
 
@@ -105,7 +106,7 @@ The contract defines topics, payloads, retained snapshots, add/remove commands, 
 
 The UI lives in [esp32-card](https://github.com/lavrenovalexsandr-cmyk/esp32-card). The Xiaomi Sensor Manager must:
 
-1. allow selection of an ESP32 gateway from devices registered by the universal integration;
+1. allow selection of an ESP32 gateway known to the Xiaomi integration through MQTT identity, regardless of whether `esp32_ota` is installed;
 2. show discovered and saved sensors for the selected gateway;
 3. mark saved sensors as **Save** and new sensors as **New**;
 4. provide a bind-key field only for adding;
