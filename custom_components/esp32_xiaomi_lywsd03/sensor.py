@@ -28,7 +28,7 @@ class XiaomiGatewaySensor(SensorEntity):
     """Expose gateway snapshot metadata for the Lovelace manager card."""
 
     _attr_has_entity_name = True
-    _attr_name = "Xiaomi sensors"
+    _attr_translation_key = "xiaomi_sensors"
     _attr_icon = "mdi:bluetooth"
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, device_id: str) -> None:
