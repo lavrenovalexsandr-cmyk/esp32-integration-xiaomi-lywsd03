@@ -62,6 +62,7 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "name": f"ESP32-{device_id[-6:]}",
         "model": "ESP32",
         "available": False,
+        "identity_received": False,
         "discovered": {},
         "registry": set(),
         "registry_received": False,
@@ -112,12 +113,15 @@ async def websocket_get_state(
     gateways = []
     if data is not None:
         for gateway in data[DATA_GATEWAYS].values():
+            if not gateway["identity_received"]:
+                continue
             gateways.append(
                 {
                     "device_id": gateway["device_id"],
                     "name": gateway["name"],
                     "model": gateway["model"],
                     "available": gateway["available"],
+                    "identity_received": gateway["identity_received"],
                     "registry_received": gateway["registry_received"],
                     "discovered_received": gateway["discovered_received"],
                     "discovered": sorted(
@@ -151,13 +155,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def ensure_gateway(device_id: str) -> dict[str, Any]:
         """Register the shared ESP32 device and return its runtime state."""
         gateway = _gateway_state(data, device_id)
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
-            name=gateway["name"],
-            model=gateway["model"],
-            manufacturer="Espressif",
-        )
+        if gateway["identity_received"]:
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
+                name=gateway["name"],
+                model=gateway["model"],
+                manufacturer="Espressif",
+            )
         return gateway
 
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
@@ -184,6 +189,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Ignoring invalid ESP32 identity message")
             return
         gateway = await ensure_gateway(device_id)
+        gateway["identity_received"] = True
         gateway["name"] = name[:64]
         gateway["model"] = (model or "ESP32")[:64]
         # Refresh the shared registry entry with the identity fields.
@@ -328,7 +334,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not MAC_RE.fullmatch(mac):
             raise HomeAssistantError("Укажите MAC датчика в формате AA:BB:CC:DD:EE:FF.")
         gateway = data[DATA_GATEWAYS].get(device_id)
-        if gateway is None:
+        if gateway is None or not gateway["identity_received"]:
             raise HomeAssistantError(
                 "ESP32 не обнаружена по MQTT identity. Проверьте MQTT и подключение шлюза."
             )
@@ -342,7 +348,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             unsynchronized = [
                 item["device_id"]
                 for item in data[DATA_GATEWAYS].values()
-                if not item["registry_received"]
+                if item["identity_received"] and not item["registry_received"]
             ]
             if unsynchronized:
                 raise HomeAssistantError(
@@ -353,7 +359,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 (
                     item["device_id"]
                     for item in data[DATA_GATEWAYS].values()
-                    if mac in item["registry"]
+                    if item["identity_received"] and mac in item["registry"]
                 ),
                 None,
             )
