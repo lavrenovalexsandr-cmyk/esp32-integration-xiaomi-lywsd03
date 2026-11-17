@@ -93,6 +93,42 @@ def _parse_snapshot(payload: str | bytes) -> dict[str, Any] | None:
     return parsed
 
 
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/get_state"}
+)
+@websocket_api.async_response
+async def websocket_get_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return gateway snapshots to the Xiaomi Sensor Manager card."""
+    entries = hass.data.get(DOMAIN, {})
+    data = next(
+        (value for key, value in entries.items() if not key.startswith("_")),
+        None,
+    )
+    gateways = []
+    if data is not None:
+        for gateway in data[DATA_GATEWAYS].values():
+            gateways.append(
+                {
+                    "device_id": gateway["device_id"],
+                    "name": gateway["name"],
+                    "model": gateway["model"],
+                    "available": gateway["available"],
+                    "registry_received": gateway["registry_received"],
+                    "discovered_received": gateway["discovered_received"],
+                    "discovered": sorted(
+                        gateway["discovered"].values(),
+                        key=lambda item: item["mac"],
+                    ),
+                    "registry": sorted(gateway["registry"]),
+                }
+            )
+    connection.send_result(msg["id"], {"gateways": gateways})
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the integration domain."""
     hass.data.setdefault(DOMAIN, {})
@@ -234,7 +270,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             not isinstance(request_id, str)
             or not request_id
             or len(request_id) > 64
-            or action not in (SERVICE_ADD_SENSOR, SERVICE_REMOVE_SENSOR.replace("_sensor", ""))
+            or action not in ("add", "remove")
             or not MAC_RE.fullmatch(mac)
             or status not in RESULT_MESSAGES
         ):
@@ -401,36 +437,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
     )
 
-    @websocket_api.websocket_command(
-        {vol.Required("type"): f"{DOMAIN}/get_state"}
-    )
-    @websocket_api.async_response
-    async def websocket_get_state(
-        hass: HomeAssistant,
-        connection: websocket_api.ActiveConnection,
-        msg: dict[str, Any],
-    ) -> None:
-        """Return gateway snapshots to the Xiaomi Sensor Manager card."""
-        gateways = []
-        for gateway in data[DATA_GATEWAYS].values():
-            gateways.append(
-                {
-                    "device_id": gateway["device_id"],
-                    "name": gateway["name"],
-                    "model": gateway["model"],
-                    "available": gateway["available"],
-                    "registry_received": gateway["registry_received"],
-                    "discovered_received": gateway["discovered_received"],
-                    "discovered": sorted(
-                        gateway["discovered"].values(),
-                        key=lambda item: item["mac"],
-                    ),
-                    "registry": sorted(gateway["registry"]),
-                }
-            )
-        connection.send_result(msg["id"], {"gateways": gateways})
-
-    websocket_api.async_register_command(hass, websocket_get_state)
+    if not hass.data[DOMAIN].get("_websocket_registered"):
+        websocket_api.async_register_command(hass, websocket_get_state)
+        hass.data[DOMAIN]["_websocket_registered"] = True
 
     return True
 
