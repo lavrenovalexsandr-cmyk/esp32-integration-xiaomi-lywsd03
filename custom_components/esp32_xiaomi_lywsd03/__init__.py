@@ -4,13 +4,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
+from pathlib import Path
 import uuid
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components import mqtt, websocket_api
+from homeassistant.components import frontend, mqtt, panel_custom, websocket_api
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -19,9 +23,12 @@ from .const import (
     AVAILABILITY_TOPIC,
     BIND_KEY_PATTERN,
     COMMAND_TIMEOUT,
+    DATA_ADD_ENTITIES,
     DATA_GATEWAYS,
+    DATA_MEASUREMENTS,
     DATA_PENDING,
     DATA_PENDING_ADDS,
+    DATA_SENSOR_ENTITIES,
     DATA_UNSUB,
     DEVICE_ID_PATTERN,
     DEVICE_IDENTIFIER_NAMESPACE,
@@ -29,13 +36,19 @@ from .const import (
     EVENT_COMMAND_RESULT,
     EVENT_STATE_UPDATED,
     IDENTITY_TOPIC,
+    MEASUREMENTS_TOPIC,
     MAC_PATTERN,
     MAX_REQUEST_ID_LENGTH,
     PROTOCOL_VERSION,
+    PANEL_STATIC_URL,
+    PANEL_URL_PATH,
+    PANEL_WEB_COMPONENT,
     SERVICE_ADD_SENSOR,
     SERVICE_REMOVE_SENSOR,
+    XIAOMI_DEVICE_IDENTIFIER_NAMESPACE,
     XIAOMI_TOPICS,
 )
+from .sensor import async_reconcile_gateway, async_write_sensor_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -144,6 +157,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_PENDING: {},
         DATA_PENDING_ADDS: {},
         "entry": entry,
+        DATA_MEASUREMENTS: {},
+        DATA_SENSOR_ENTITIES: {},
+        DATA_ADD_ENTITIES: None,
     }
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
     device_registry = dr.async_get(hass)
@@ -193,6 +209,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             model=gateway["model"],
             manufacturer="Espressif",
         )
+        async_reconcile_gateway(hass, entry, data, device_id)
         _fire_state_updated(hass, device_id)
 
     async def availability_message(msg: mqtt.ReceiveMessage) -> None:
@@ -207,6 +224,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id = match.group(1).upper()
         gateway = ensure_gateway(device_id)
         gateway["available"] = payload == "online"
+        for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
+            if sensor_gateway_id == device_id:
+                async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
 
     async def xiaomi_message(msg: mqtt.ReceiveMessage) -> None:
@@ -262,6 +282,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 gateway["discovered"] = sensors
                 gateway["discovered_received"] = True
+            if message_type == "registry":
+                async_reconcile_gateway(hass, entry, data, device_id)
             _fire_state_updated(hass, device_id)
             return
 
@@ -313,12 +335,71 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             },
         )
 
+    async def measurement_message(msg: mqtt.ReceiveMessage) -> None:
+        """Cache and distribute retained measurements from a saved sensor."""
+        match = re.fullmatch(
+            r"esp32/([0-9A-Fa-f]{12})/xiaomi/sensor/([0-9A-Fa-f:]{17})/state",
+            msg.topic,
+        )
+        if not match:
+            return
+        device_id = match.group(1).upper()
+        mac = match.group(2).upper()
+        if not MAC_RE.fullmatch(mac):
+            return
+        key = (device_id, mac)
+        if not msg.payload:
+            data[DATA_MEASUREMENTS].pop(key, None)
+            async_write_sensor_state(data, device_id, mac)
+            _fire_state_updated(hass, device_id)
+            return
+        try:
+            payload = json.loads(msg.payload)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Ignoring invalid Xiaomi measurement payload from ESP32 %s", device_id)
+            return
+        if (
+            not isinstance(payload, dict)
+            or type(payload.get("version")) is not int
+            or payload.get("version") != PROTOCOL_VERSION
+        ):
+            _LOGGER.warning("Ignoring unsupported Xiaomi measurement payload from ESP32 %s", device_id)
+            return
+
+        values: dict[str, int | float] = {}
+        temperature = payload.get("temperature")
+        if (
+            isinstance(temperature, (int, float))
+            and not isinstance(temperature, bool)
+            and math.isfinite(temperature)
+        ):
+            values["temperature"] = temperature
+        humidity = payload.get("humidity")
+        if (
+            isinstance(humidity, (int, float))
+            and not isinstance(humidity, bool)
+            and math.isfinite(humidity)
+            and 0 <= humidity <= 100
+        ):
+            values["humidity"] = humidity
+        battery = payload.get("battery")
+        if type(battery) is int and 0 <= battery <= 100:
+            values["battery"] = battery
+
+        if not values:
+            _LOGGER.debug("Xiaomi measurement message has no valid values for %s", mac)
+            return
+        data[DATA_MEASUREMENTS][key] = values
+        async_write_sensor_state(data, device_id, mac)
+        _fire_state_updated(hass, device_id)
+
     data[DATA_UNSUB] = [
         await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
         await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
+        await mqtt.async_subscribe(hass, MEASUREMENTS_TOPIC, measurement_message, qos=1),
     ]
 
     async def send_command(
@@ -505,11 +586,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, websocket_get_state)
         hass.data[DOMAIN]["_websocket_registered"] = True
 
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+
+    if not hass.data[DOMAIN].get("_static_path_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    PANEL_STATIC_URL,
+                    str(Path(__file__).parent / "www" / "xiaomi-panel.js"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        hass.data[DOMAIN]["_static_path_registered"] = True
+
+    if not hass.data[DOMAIN].get("_panel_registered"):
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=PANEL_URL_PATH,
+            webcomponent_name=PANEL_WEB_COMPONENT,
+            sidebar_title="Xiaomi Sensors",
+            sidebar_icon="mdi:bluetooth-connect",
+            module_url=f"{PANEL_STATIC_URL}?v=1",
+            require_admin=True,
+        )
+        hass.data[DOMAIN]["_panel_registered"] = True
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the integration entry."""
+    if not await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR]):
+        return False
+    if hass.data.get(DOMAIN, {}).get("_panel_registered"):
+        frontend.async_remove_panel(hass, PANEL_URL_PATH)
+        hass.data[DOMAIN]["_panel_registered"] = False
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
     for unsubscribe in data.get(DATA_UNSUB, []):
         unsubscribe()
