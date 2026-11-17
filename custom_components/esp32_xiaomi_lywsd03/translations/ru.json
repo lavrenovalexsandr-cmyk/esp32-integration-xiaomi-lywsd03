@@ -9,12 +9,5 @@
     "abort": {
       "already_configured": "Интеграция уже настроена."
     }
-  },
-  "entity": {
-    "sensor": {
-      "xiaomi_sensors": {
-        "name": "Датчики Xiaomi"
-      }
-    }
   }
 }
