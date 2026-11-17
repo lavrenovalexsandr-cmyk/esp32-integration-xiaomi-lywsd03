@@ -2,7 +2,33 @@
 
 A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC BLE sensors.
 
-> Status: MQTT v1 is agreed and implemented in firmware. This repository contains the specification and documentation; the Home Assistant Python integration is being developed in branch `feature/xiaomi-ha-integration-v1`.
+> Status: the first Python integration implementation is available in `custom_components/esp32_xiaomi_lywsd03` and prepared for HACS installation. Runtime verification in Home Assistant with an MQTT broker and ESP32 firmware is still required.
+
+## HACS installation
+
+1. Open **HACS → Integrations**.
+2. Open the top-right menu and select **Custom repositories**.
+3. Add `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03` with category **Integration**.
+4. Find and install **ESP32 Xiaomi LYWSD03MMC**.
+5. Restart Home Assistant.
+6. Go to **Settings → Devices & services → Add integration** and add **ESP32 Xiaomi LYWSD03MMC**.
+
+Configure the standard Home Assistant **MQTT** integration separately and make sure the broker is connected to the ESP32 gateways. This integration reuses the configured MQTT connection; it does not need broker credentials in its own config flow.
+
+HACS installation requires a published GitHub Release whose tag matches the version in `manifest.json`. Before the first release, you can test manually by copying `custom_components/esp32_xiaomi_lywsd03` into `config/custom_components/`.
+
+## Gateway entity and card data
+
+One manager entity `sensor.<gateway>_xiaomi_sensors` is created for each discovered ESP32 and attached to the shared ESP32 device entry. It is not a Xiaomi measurement entity. Its attributes are:
+
+- `device_id` — stable gateway ID;
+- `available` — latest availability state;
+- `discovered` — discovered sensor MAC addresses;
+- `registry` — saved sensor MAC addresses;
+- `pending` — pending commands;
+- `last_result` — most recently completed command result.
+
+Temperature, humidity and battery entities continue to be created by firmware through MQTT Discovery.
 
 ## Purpose and responsibility boundaries
 
