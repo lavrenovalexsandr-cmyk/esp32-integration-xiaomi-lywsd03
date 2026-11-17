@@ -1,7 +1,7 @@
 """Dynamic Xiaomi LYWSD03MMC measurement entities."""
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -77,9 +77,7 @@ class XiaomiMeasurementSensor(SensorEntity):
         self._data = data
         self._device_id = device_id
         self._mac = mac
-        self._attr_unique_id = (
-            f"{device_id}_{_compact_mac(mac)}_{description.key}"
-        )
+        self._attr_unique_id = f"{device_id}_{_compact_mac(mac)}_{description.key}"
 
     @property
     def device_info(self) -> dr.DeviceInfo:
@@ -106,11 +104,9 @@ class XiaomiMeasurementSensor(SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the latest retained measurement, if known."""
-        state = self._data[DATA_MEASUREMENTS].get(
-            (self._device_id, self._mac), {}
-        )
+        state = self._data[DATA_MEASUREMENTS].get((self._device_id, self._mac), {})
         value = state.get(self.entity_description.key)
-        return value if isinstance(value, (int, float)) else None
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 async def async_setup_entry(
@@ -150,30 +146,44 @@ def async_reconcile_gateway(
     tracked: dict[tuple[str, str], list[XiaomiMeasurementSensor]] = data[
         DATA_SENSOR_ENTITIES
     ]
+    stale_macs: set[str] = set()
+    unique_id_pattern = re.compile(
+        r"^([0-9A-F]{12})_([0-9A-F]{12})_(temperature|humidity|battery)$"
+    )
 
-    for key in tuple(tracked):
-        tracked_device_id, mac = key
-        if tracked_device_id != device_id or mac in desired_macs:
+    # Reconcile registry entries as well as in-memory entities. This also
+    # cleans up sensors removed while Home Assistant was stopped.
+    for registry_entry in tuple(entity_registry.entities.values()):
+        if (
+            registry_entry.config_entry_id != entry.entry_id
+            or registry_entry.platform != DOMAIN
+        ):
             continue
-        prefix = f"{device_id}_{_compact_mac(mac)}_"
-        for registry_entry in tuple(entity_registry.entities.values()):
-            if (
-                registry_entry.config_entry_id == entry.entry_id
-                and registry_entry.platform == DOMAIN
-                and registry_entry.unique_id.startswith(prefix)
-            ):
-                entity_registry.async_remove(registry_entry.entity_id)
-        child = device_registry.async_get_device(
-            {
-                (
-                    XIAOMI_DEVICE_IDENTIFIER_NAMESPACE,
-                    _sensor_device_id(device_id, mac),
-                )
-            }
+        match = unique_id_pattern.fullmatch(registry_entry.unique_id)
+        if match is None or match.group(1) != device_id:
+            continue
+        compact_mac = match.group(2)
+        mac = ":".join(compact_mac[index:index + 2] for index in range(0, 12, 2))
+        if mac not in desired_macs:
+            stale_macs.add(mac)
+            entity_registry.async_remove(registry_entry.entity_id)
+
+    for tracked_device_id, mac in tuple(tracked):
+        if tracked_device_id == device_id and mac not in desired_macs:
+            stale_macs.add(mac)
+            tracked.pop((tracked_device_id, mac), None)
+
+    for mac in stale_macs:
+        data[DATA_MEASUREMENTS].pop((device_id, mac), None)
+        child = device_registry.async_get_child_device_by_identifier(
+            (
+                XIAOMI_DEVICE_IDENTIFIER_NAMESPACE,
+                _sensor_device_id(device_id, mac),
+            ),
+            entry.entry_id,
         )
         if child is not None:
             device_registry.async_remove_device(child.id)
-        tracked.pop(key, None)
 
     for mac in sorted(desired_macs):
         key = (device_id, mac)
