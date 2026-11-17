@@ -3,18 +3,11 @@
     "step": {
       "user": {
         "title": "ESP32 Xiaomi LYWSD03MMC",
-        "description": "Gateways are discovered automatically through the configured Home Assistant MQTT integration."
+        "description": "Connect to ESP32 gateways through the configured Home Assistant MQTT integration."
       }
     },
     "abort": {
       "already_configured": "The integration is already configured."
-    }
-  },
-  "entity": {
-    "sensor": {
-      "xiaomi_sensors": {
-        "name": "Xiaomi sensors"
-      }
     }
   }
 }
