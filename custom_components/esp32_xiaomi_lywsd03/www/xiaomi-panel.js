@@ -8,6 +8,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._selectedMac = "";
     this._unsubscribe = null;
     this._loading = false;
+    this._busy = false;
   }
 
   set hass(hass) {
@@ -180,8 +181,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this.shadowRoot.getElementById("remove").hidden = !saved;
     this.shadowRoot.getElementById("gateway").disabled = this._gateways.length === 0;
     this.shadowRoot.getElementById("sensor").disabled = !selected;
-    this.shadowRoot.getElementById("add").disabled = !selected || !gateway?.available;
-    this.shadowRoot.getElementById("remove").disabled = !saved || !gateway?.available;
+    this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available;
+    this.shadowRoot.getElementById("remove").disabled = this._busy || !saved || !gateway?.available;
   }
 
   async _addSensor() {
@@ -228,8 +229,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
   }
 
   _setBusy(busy) {
-    this.shadowRoot.getElementById("add").disabled = busy || this.shadowRoot.getElementById("add").disabled;
-    this.shadowRoot.getElementById("remove").disabled = busy || this.shadowRoot.getElementById("remove").disabled;
+    this._busy = busy;
+    this._renderSelection();
     this.shadowRoot.getElementById("refresh").disabled = busy;
   }
 
