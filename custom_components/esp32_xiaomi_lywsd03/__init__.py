@@ -107,8 +107,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
-        payload = _decode_payload(msg.payload)
-        if payload is None:
+        # The shared Platform Core identity payload predates the Xiaomi v1
+        # protocol and intentionally has no protocol-version field.
+        try:
+            payload = json.loads(msg.payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(payload, dict):
             return
         device_id = str(payload.get("id", "")).upper()
         name = str(payload.get("name", "")).strip()
@@ -138,12 +143,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not match:
             return
         device_id = match.group(1).upper()
-        if device_id not in data[DATA_GATEWAYS]:
-            return
         payload = _decode_payload(msg.payload)
         if payload is None or not isinstance(payload.get("sensors"), list):
             _LOGGER.warning("Ignoring invalid Xiaomi %s snapshot from %s", kind, device_id)
             return
+        # Retained snapshots can be delivered before the retained identity.
+        # Keep them; the later identity message enriches the same gateway.
+        if device_id not in data[DATA_GATEWAYS]:
+            update_gateway(device_id)
         macs: set[str] = set()
         for item in payload["sensors"]:
             if not isinstance(item, dict):
