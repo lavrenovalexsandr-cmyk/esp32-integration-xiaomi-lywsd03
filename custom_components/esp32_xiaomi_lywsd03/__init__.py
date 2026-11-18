@@ -7,6 +7,7 @@ import logging
 import math
 import re
 import uuid
+import time
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,11 @@ async def websocket_get_state(
                         key=lambda item: item["mac"],
                     ),
                     "registry": sorted(gateway["registry"]),
+                    "sensor_last_seen": {
+                        mac: seen
+                        for (gateway_id, mac), seen in data["last_measurements"].items()
+                        if gateway_id == gateway["device_id"]
+                    },
                 }
             )
     connection.send_result(msg["id"], {"gateways": gateways})
@@ -160,6 +166,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_PENDING_ADDS: {},
         "entry": entry,
         DATA_MEASUREMENTS: {},
+        "last_measurements": {},
         DATA_SENSOR_ENTITIES: {},
         DATA_ADD_ENTITIES: None,
     }
@@ -359,6 +366,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         key = (device_id, mac)
         if not msg.payload:
             data[DATA_MEASUREMENTS].pop(key, None)
+            data["last_measurements"].pop(key, None)
             async_write_sensor_state(data, device_id, mac)
             _fire_state_updated(hass, device_id)
             return
@@ -410,6 +418,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             values["battery"] = battery
 
         data[DATA_MEASUREMENTS][key] = values
+        # Retained MQTT state is useful for restoring sensor values, but it
+        # does not prove that the BLE sensor is currently reachable.
+        if not msg.retain:
+            data["last_measurements"][key] = time.time()
         async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
 
