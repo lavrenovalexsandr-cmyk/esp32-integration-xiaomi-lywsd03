@@ -1,4 +1,4 @@
-"""Home Assistant integration for ESP32 Xiaomi LYWSD03MMC gateways."""
+"""Home Assistant integration for Xiaomi Sensor Manager."""
 from __future__ import annotations
 
 import asyncio
@@ -652,7 +652,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass,
             frontend_url_path=PANEL_URL_PATH,
             webcomponent_name=PANEL_WEB_COMPONENT,
-            sidebar_title="Xiaomi Sensors",
+            sidebar_title="Xiaomi Sensor Manager",
             sidebar_icon="mdi:bluetooth-connect",
             module_url=f"{PANEL_STATIC_URL}?v=1",
             require_admin=True,
