@@ -132,10 +132,20 @@ async def websocket_get_state(
         for gateway in data[DATA_GATEWAYS].values():
             if not gateway["identity_received"]:
                 continue
+            # Prefer the name explicitly assigned by the user in Home Assistant.
+            # The shared identifier lets us read the same gateway entry used by esp32_ota.
+            gateway_device = dr.async_get(hass).async_get_device(
+                identifiers={(DEVICE_IDENTIFIER_NAMESPACE, gateway["device_id"])}
+            )
+            display_name = (
+                gateway_device.name_by_user
+                if gateway_device is not None and gateway_device.name_by_user
+                else gateway["name"]
+            )
             gateways.append(
                 {
                     "device_id": gateway["device_id"],
-                    "name": gateway["name"],
+                    "name": display_name,
                     "model": gateway["model"],
                     "available": gateway["available"],
                     "availability_received": gateway["availability_received"],
