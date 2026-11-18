@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Xiaomi Sensor Manager",
+        "title": "ESP32 Xiaomi Sensor Manager",
         "description": "Gateways are discovered automatically through the configured Home Assistant MQTT integration."
       }
     },
