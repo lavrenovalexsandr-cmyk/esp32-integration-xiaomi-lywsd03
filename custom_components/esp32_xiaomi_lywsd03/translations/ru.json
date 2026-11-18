@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "ESP32 Xiaomi LYWSD03MMC",
+        "title": "Xiaomi Sensor Manager",
         "description": "Шлюзы автоматически обнаруживаются через настроенную интеграцию MQTT в Home Assistant."
       }
     },
