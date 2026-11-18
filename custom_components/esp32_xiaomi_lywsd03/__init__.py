@@ -240,6 +240,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # after the gateway reconnects.
             gateway["discovered"] = {}
             gateway["discovered_received"] = False
+            # Measurements observed before a gateway disconnect must not make
+            # sensors appear online immediately after the gateway reconnects.
+            for sensor_key in tuple(data["last_measurements"]):
+                if sensor_key[0] == device_id:
+                    data["last_measurements"].pop(sensor_key, None)
         for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
             if sensor_gateway_id == device_id:
                 async_write_sensor_state(data, device_id, mac)
