@@ -1,17 +1,17 @@
-# ESP32 Home Assistant Integration — Xiaomi LYWSD03MMC
+# Xiaomi Sensor Manager
 
 Специализированная интеграция Home Assistant для ESP32-шлюзов с BLE-датчиками Xiaomi LYWSD03MMC.
 
-> Статус: выполняется переход на архитектуру, в которой Xiaomi HA integration полностью управляет устройствами и измерительными сущностями датчиков. Проверка полного сценария требует Home Assistant, MQTT-брокера и ESP32 firmware.
+> Статус: архитектура, в которой интеграция Xiaomi управляет устройствами и измерительными сущностями датчиков, реализована. Сквозная проверка требует Home Assistant, MQTT-брокера и ESP32 firmware.
 
 ## Установка через HACS
 
 1. Откройте **HACS → Integrations**.
 2. Откройте меню в правом верхнем углу и выберите **Custom repositories**.
-3. Добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03` с категорией **Integration**.
-4. Найдите **ESP32 Xiaomi LYWSD03MMC** и установите интеграцию.
+3. Добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` с категорией **Integration**.
+4. Найдите **Xiaomi Sensor Manager** и установите интеграцию.
 5. Перезапустите Home Assistant.
-6. В **Settings → Devices & services → Add integration** найдите **ESP32 Xiaomi LYWSD03MMC** и добавьте её.
+6. В **Settings → Devices & services → Add integration** найдите **Xiaomi Sensor Manager** и добавьте её.
 
 Отдельно настройте штатную интеграцию **MQTT** в Home Assistant и убедитесь, что брокер подключён к ESP32. Xiaomi-интеграция использует уже настроенное MQTT-подключение и не требует адреса брокера или учётных данных в своей конфигурации.
 
@@ -148,10 +148,9 @@ MQTT v1 согласован и реализован на стороне firmwar
 ## Связанные проекты
 
 - [Firmware](https://github.com/lavrenovalexsandr-cmyk/esp32-firmware-xiaomi-lywsd03)
-- [Универсальная ESP32-интеграция](https://github.com/lavrenovalexsandr-cmyk/esp32-integration-core)
+- [Универсальная ESP32-интеграция](https://github.com/lavrenovalexsandr-cmyk/esp32-integration-manager)
 - [ESP32 Platform Core](https://github.com/lavrenovalexsandr-cmyk/esp32-platform-core)
 - [ESP32 Platform BLE](https://github.com/lavrenovalexsandr-cmyk/esp32-component-ble)
 - [Xiaomi LYWSD03MMC driver](https://github.com/lavrenovalexsandr-cmyk/esp32-component-xiaomi-lywsd03)
-- [ESP32 Lovelace Cards](https://github.com/lavrenovalexsandr-cmyk/esp32-card)
 
 Основная документация — README.md на русском языке; английская версия — README_EN.md.
