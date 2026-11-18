@@ -155,7 +155,14 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const sensorSelect = this.shadowRoot.getElementById("sensor");
     gatewaySelect.replaceChildren();
     for (const gateway of this._gateways) {
-      gatewaySelect.add(new Option(`${gateway.name} (${gateway.device_id})`, gateway.device_id));
+      const known = gateway.availability_received !== false;
+      const online = Boolean(gateway.available);
+      const status = known ? (online ? "Online" : "Offline") : "Unknown";
+      const option = new Option(`${gateway.name} (${gateway.device_id}) — ${status}`, gateway.device_id);
+      option.style.color = known
+        ? (online ? "var(--success-color)" : "var(--error-color)")
+        : "var(--secondary-text-color)";
+      gatewaySelect.add(option);
     }
     gatewaySelect.value = this._selectedGateway;
     const gateway = this._selectedGatewayData();
@@ -169,7 +176,11 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         ? "…"
         : `${item.online ? "Online" : "Offline"} — ${item.saved ? "Save" : "New"}`;
       const rssi = Number.isInteger(item.rssi) ? ` · RSSI ${item.rssi} dBm` : "";
-      sensorSelect.add(new Option(`${item.mac} — ${status}${rssi}`, item.mac));
+      const option = new Option(`${item.mac} — ${status}${rssi}`, item.mac);
+      option.style.color = item.online
+        ? "var(--success-color)"
+        : "var(--error-color)";
+      sensorSelect.add(option);
     }
     sensorSelect.value = this._selectedMac;
     const gatewayStatus = this.shadowRoot.getElementById("gateway-status");
