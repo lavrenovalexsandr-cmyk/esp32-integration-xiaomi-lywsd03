@@ -197,7 +197,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             or not DEVICE_ID_RE.fullmatch(device_id)
             or not name
         ):
-            _LOGGER.warning("Ignoring invalid ESP32 identity message")            return
+            _LOGGER.warning("Ignoring invalid ESP32 identity message")
+            return
         gateway = ensure_gateway(device_id)
         gateway["identity_received"] = True
         gateway["name"] = name[:64]
@@ -402,7 +403,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             try:
                 if math.isfinite(float(humidity)):
                     values["humidity"] = humidity
-            except (OverflowError, ValueError):                pass
+            except (OverflowError, ValueError):
+                pass
         battery = payload.get("battery")
         if type(battery) is int and 0 <= battery <= 100:
             values["battery"] = battery
@@ -601,7 +603,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     if not hass.data[DOMAIN].get("_websocket_registered"):
-        websocket_api.async_register_command(hass, websocket_get_state)        hass.data[DOMAIN]["_websocket_registered"] = True
+        websocket_api.async_register_command(hass, websocket_get_state)
+        hass.data[DOMAIN]["_websocket_registered"] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
