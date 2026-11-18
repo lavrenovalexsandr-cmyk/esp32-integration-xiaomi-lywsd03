@@ -75,6 +75,7 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "name": f"ESP32-{device_id[-6:]}",
         "model": "ESP32",
         "available": False,
+        "availability_received": False,
         "identity_received": False,
         "discovered": {},
         "registry": set(),
@@ -136,6 +137,7 @@ async def websocket_get_state(
                     "name": gateway["name"],
                     "model": gateway["model"],
                     "available": gateway["available"],
+                    "availability_received": gateway["availability_received"],
                     "identity_received": gateway["identity_received"],
                     "registry_received": gateway["registry_received"],
                     "discovered_received": gateway["discovered_received"],
@@ -224,6 +226,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id = match.group(1).upper()
         gateway = ensure_gateway(device_id)
         gateway["available"] = payload == "online"
+        gateway["availability_received"] = True
         for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
             if sensor_gateway_id == device_id:
                 async_write_sensor_state(data, device_id, mac)
