@@ -1,6 +1,6 @@
 {
   "domain": "esp32_xiaomi_lywsd03",
-  "name": "Xiaomi Sensor Manager",
+  "name": "ESP32 Xiaomi Sensor Manager",
   "codeowners": [
     "@lavrenovalexsandr-cmyk"
   ],
@@ -14,5 +14,5 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager/issues",
-  "version": "0.1.0"
+  "version": "1.0.2"
 }
