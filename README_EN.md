@@ -140,7 +140,7 @@ After removal, a sensor remains in the combined list if it is still discovered; 
 1. HA integration foundation, config flow and MQTT v1 subscriptions — implemented.
 2. Per-gateway snapshot state and recovery from retained snapshots — implemented.
 3. Add/remove services, validation, command-result correlation and cross-gateway MAC locking — implemented.
-4. WebSocket state API and events for the Xiaomi Sensor Manager — implemented.
+4. WebSocket state API and events for ESP32 Xiaomi Sensor Manager — implemented.
 5. HA sensor entities and child devices from retained registry — implemented; runtime verification in Home Assistant is pending.
 6. Xiaomi Sensor Manager panel bundled with the integration — implemented; runtime verification in Home Assistant is pending.
 7. Runtime verification with multiple gateways, offline/reconnect, QoS 1 redelivery, dynamic entity removal and Areas remains.
