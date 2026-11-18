@@ -137,11 +137,13 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const discovered = Array.isArray(gateway.discovered) ? gateway.discovered : [];
     const registry = Array.isArray(gateway.registry) ? gateway.registry : [];
     const saved = new Set(registry);
+    const online = new Set(discovered.map((item) => item.mac));
     const items = new Map();
     for (const item of discovered) items.set(item.mac, item);
     for (const mac of registry) if (!items.has(mac)) items.set(mac, { mac });
     return [...items.values()].sort((a, b) => a.mac.localeCompare(b.mac)).map((item) => ({
       mac: item.mac,
+      online: online.has(item.mac),
       saved: saved.has(item.mac),
       rssi: item.rssi
     }));
@@ -163,7 +165,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     }
     sensorSelect.replaceChildren();
     for (const item of options) {
-      const status = !gateway?.registry_received ? "…" : (item.saved ? "Save" : "New");
+      const status = !gateway?.registry_received
+        ? "…"
+        : `${item.online ? "Online" : "Offline"} — ${item.saved ? "Save" : "New"}`;
       const rssi = Number.isInteger(item.rssi) ? ` · RSSI ${item.rssi} dBm` : "";
       sensorSelect.add(new Option(`${item.mac} — ${status}${rssi}`, item.mac));
     }
@@ -196,13 +200,21 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const sensorStatus = this.shadowRoot.getElementById("sensor-status");
     sensorStatus.replaceChildren();
     if (selected && gateway?.registry_received) {
-      const badge = document.createElement("span");
-      badge.className = `tag ${saved ? "saved" : "new"}`;
-      badge.textContent = saved ? "Save" : "New";
-      sensorStatus.append(badge);
+      const availabilityBadge = document.createElement("span");
+      availabilityBadge.className = `tag ${selected.online ? "online" : "offline"}`;
+      availabilityBadge.textContent = selected.online ? "Online" : "Offline";
+      sensorStatus.append(availabilityBadge);
+
+      const registryBadge = document.createElement("span");
+      registryBadge.className = `tag ${saved ? "saved" : "new"}`;
+      registryBadge.textContent = saved ? "Save" : "New";
+      sensorStatus.append(registryBadge);
+
       const note = document.createElement("span");
       note.className = "status-note";
-      note.textContent = saved ? "Датчик сохранён на шлюзе" : "Датчик обнаружен, но не сохранён";
+      note.textContent = saved
+        ? (selected.online ? "Датчик сохранён и обнаруживается шлюзом" : "Датчик сохранён, но сейчас не обнаруживается")
+        : (selected.online ? "Датчик обнаружен, но не сохранён" : "Датчик не обнаруживается шлюзом");
       sensorStatus.append(note);
     } else if (selected) {
       sensorStatus.textContent = "Ожидается синхронизация реестра шлюза.";

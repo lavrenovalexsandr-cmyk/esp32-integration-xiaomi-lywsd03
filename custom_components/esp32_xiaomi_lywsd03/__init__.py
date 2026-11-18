@@ -227,6 +227,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         gateway = ensure_gateway(device_id)
         gateway["available"] = payload == "online"
         gateway["availability_received"] = True
+        if payload == "offline":
+            # Discovered sensors are transient observations, not persisted state.
+            # Keep the saved registry intact and wait for fresh advertisements
+            # after the gateway reconnects.
+            gateway["discovered"] = {}
+            gateway["discovered_received"] = False
         for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
             if sensor_gateway_id == device_id:
                 async_write_sensor_state(data, device_id, mac)
