@@ -10,6 +10,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._statusTimer = null;
     this._loading = false;
     this._busy = false;
+    this._setupDeviceId = null;
   }
 
   set hass(hass) {
@@ -108,6 +109,12 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .message { min-height:22px; margin-top:14px; color:var(--success-color); overflow-wrap:anywhere; }
         .message.error { color:var(--error-color); }
         .empty { padding:14px 0; color:var(--secondary-text-color); }
+        dialog { width:min(440px, calc(100% - 40px)); max-width:440px; border:0; border-radius:14px; padding:24px; color:var(--primary-text-color); background:var(--card-background-color); box-shadow:0 12px 40px #0005; }
+        dialog::backdrop { background:#0008; }
+        dialog h2 { margin:0 0 8px; font-size:20px; font-weight:500; }
+        dialog p { margin:0 0 16px; }
+        dialog select { box-sizing:border-box; width:100%; min-height:44px; padding:8px 12px; border:1px solid var(--outline-color); border-radius:8px; background:var(--input-fill-color, var(--card-background-color)); color:var(--primary-text-color); font:inherit; }
+        .dialog-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
         @media (max-width:600px) { :host { padding:16px; } .card { padding:16px; } }
       </style>
       <div class="content">
@@ -129,12 +136,30 @@ class Esp32XiaomiSensorManager extends HTMLElement {
           </div>
           <div id="message" class="message" role="status" aria-live="polite"></div>
         </div>
+        <dialog id="device-setup">
+          <h2>Назвать и назначить</h2>
+          <p>Настройте новое устройство Xiaomi в Home Assistant.</p>
+          <label for="device-name">Название устройства</label>
+          <input id="device-name" type="text" maxlength="128" autocomplete="off">
+          <label for="device-area">Область</label>
+          <select id="device-area">
+            <option value="">Не назначать</option>
+          </select>
+          <div class="dialog-actions">
+            <button id="device-setup-cancel" class="secondary" type="button">Позже</button>
+            <button id="device-setup-save" type="button">Сохранить</button>
+          </div>
+        </dialog>
       </div>
     `;
 
     this.shadowRoot.getElementById("add").addEventListener("click", () => this._addSensor());
     this.shadowRoot.getElementById("remove").addEventListener("click", () => this._removeSensor());
     this.shadowRoot.getElementById("refresh").addEventListener("click", () => this._loadState());
+    this.shadowRoot.getElementById("device-setup-cancel").addEventListener("click", () => {
+      this.shadowRoot.getElementById("device-setup").close();
+    });
+    this.shadowRoot.getElementById("device-setup-save").addEventListener("click", () => this._saveDeviceSetup());
   }
 
   _selectedGatewayData() {
@@ -346,17 +371,87 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this.shadowRoot.getElementById("bind-key").value = "";
     this._setBusy(true);
     try {
+      const addedMac = this._selectedMac;
+      const addedGateway = gateway.device_id;
       await this._hass.callService("esp32_xiaomi_lywsd03", "add_sensor", {
-        device_id: gateway.device_id,
-        mac: this._selectedMac,
+        device_id: addedGateway,
+        mac: addedMac,
         bind_key: bindKey
       });
-      this._showMessage("Команда добавления подтверждена шлюзом.", false);
+      this._showMessage("Датчик добавлен. Подготавливаю его настройку…", false);
       await this._loadState();
+      const device = await this._waitForSensorDevice(addedGateway, addedMac);
+      if (device) {
+        await this._openDeviceSetup(device);
+      } else {
+        this._showMessage("Датчик добавлен, но Home Assistant пока не зарегистрировал его устройство. Обновите список чуть позже.", true);
+      }
     } catch (error) {
       this._showMessage(this._errorText(error), true);
     } finally {
       this._setBusy(false);
+    }
+  }
+
+  async _waitForSensorDevice(deviceId, mac) {
+    const identifier = `${deviceId}_${mac.replace(/:/g, "")}`;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const devices = await this._hass.callWS({ type: "config/device_registry/list" });
+      const found = devices.find((device) =>
+        Array.isArray(device.identifiers) &&
+        device.identifiers.some((item) =>
+          Array.isArray(item) &&
+          item[0] === "esp32_xiaomi_lywsd03" &&
+          item[1] === identifier
+        )
+      );
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return null;
+  }
+
+  async _openDeviceSetup(device) {
+    const areas = await this._hass.callWS({ type: "config/area_registry/list" });
+    const select = this.shadowRoot.getElementById("device-area");
+    select.replaceChildren();
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Не назначать";
+    select.append(none);
+    for (const area of [...areas].sort((a, b) => a.name.localeCompare(b.name))) {
+      const option = document.createElement("option");
+      option.value = area.area_id;
+      option.textContent = area.name;
+      select.append(option);
+    }
+    this._setupDeviceId = device.id;
+    this.shadowRoot.getElementById("device-name").value =
+      device.name_by_user || device.name || "Xiaomi LYWSD03MMC";
+    select.value = device.area_id || "";
+    this.shadowRoot.getElementById("device-setup").showModal();
+  }
+
+  async _saveDeviceSetup() {
+    if (!this._setupDeviceId) return;
+    const name = this.shadowRoot.getElementById("device-name").value.trim();
+    const areaId = this.shadowRoot.getElementById("device-area").value || null;
+    const save = this.shadowRoot.getElementById("device-setup-save");
+    save.disabled = true;
+    try {
+      await this._hass.callWS({
+        type: "config/device_registry/update",
+        device_id: this._setupDeviceId,
+        name_by_user: name || null,
+        area_id: areaId
+      });
+      this.shadowRoot.getElementById("device-setup").close();
+      this._setupDeviceId = null;
+      this._showMessage("Название и область устройства сохранены.", false);
+    } catch (error) {
+      this._showMessage(this._errorText(error), true);
+    } finally {
+      save.disabled = false;
     }
   }
 
