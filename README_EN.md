@@ -2,7 +2,7 @@
 
 A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC BLE sensors.
 
-> Status: the first Python integration implementation is available in `custom_components/esp32_xiaomi_lywsd03` and prepared for HACS installation. Runtime verification in Home Assistant with an MQTT broker and ESP32 firmware is still required.
+> Status: the integration is being migrated to an architecture where the Xiaomi HA integration owns sensor devices and measurement entities. End-to-end verification requires Home Assistant, an MQTT broker and ESP32 firmware.
 
 ## HACS installation
 
@@ -17,18 +17,11 @@ Configure the standard Home Assistant **MQTT** integration separately and make s
 
 A GitHub Release is not required for installation as a Custom repository: if there are no releases, HACS uses the short hash of the latest commit as the version. For regular versioned updates, publishing a GitHub Release with a tag aligned with `manifest.json` is recommended. You can also test manually by copying `custom_components/esp32_xiaomi_lywsd03` into `config/custom_components/`.
 
-## Gateway entity and card data
+## Home Assistant entities and manager panel
 
-One manager entity `sensor.<gateway>_xiaomi_sensors` is created for each discovered ESP32 and attached to the shared ESP32 device entry. It is not a Xiaomi measurement entity. Its attributes are:
+The integration creates a separate Home Assistant device for every saved Xiaomi LYWSD03MMC, with three measurement entities: temperature, humidity and battery. Each sensor device is linked to its ESP32 gateway parent through `via_device`.
 
-- `device_id` — stable gateway ID;
-- `available` — latest availability state;
-- `discovered` — discovered sensor MAC addresses;
-- `registry` — saved sensor MAC addresses;
-- `pending` — pending commands;
-- `last_result` — most recently completed command result.
-
-Temperature, humidity and battery entities continue to be created by firmware through MQTT Discovery.
+The **Xiaomi Sensor Manager** panel is part of this repository and appears in the Home Assistant sidebar after the integration is configured. It is admin-only. No separate Lovelace card or second HACS repository is required.
 
 ## Purpose and responsibility boundaries
 
@@ -36,13 +29,12 @@ This integration handles Xiaomi-specific operations and coordination across mult
 
 Responsibilities:
 
-- **Firmware / Platform Core:** BLE discovery, bind-key storage in NVS, MQTT v1, retained snapshots and measurements, and Home Assistant MQTT Discovery for sensors.
+- **Firmware:** BLE discovery, bind-key storage in NVS, registry, commands and command results, retained snapshots and retained MQTT measurements.
+- **Platform Core:** shared ESP32 identity and availability, MQTT, and Discovery only for generic gateway entities. Xiaomi entities are not created through Platform Core Discovery.
 - **Universal `esp32_ota` integration:** OTA and generic device-control commands; it also uses the shared gateway device entry but is not required by the Xiaomi integration.
 - **Shared MQTT contract / Platform Core:** stable gateway identity and its base information.
-- **This Xiaomi integration:** MQTT snapshot handling, per-gateway state, global enforcement of the one-MAC/one-gateway rule, add/remove services and secure bind-key forwarding.
-- **Lovelace card:** gateway/sensor selection and calls to this integration's services. The card does not publish MQTT directly or store bind-keys.
-
-The Xiaomi integration does not create sensor devices or duplicate their measurement entities: the three entities for each sensor are created by firmware through Platform Core's standard MQTT Discovery. For the manager UI, the integration provides a WebSocket state API and update events.
+- **This Xiaomi integration:** MQTT snapshots and measurements, per-gateway state, the one-MAC/one-gateway rule, add/remove services, secure bind-key forwarding, HA device/sensor lifecycle and the manager panel.
+- **Xiaomi Sensor Manager panel:** gateway/sensor selection, `New`/`Save` status, add and remove operations through integration services. The panel does not publish MQTT directly or store bind-keys.
 
 ## Shared ESP32 gateway identity
 
@@ -103,9 +95,9 @@ Snapshots are always kept separately by gateway device ID. A MAC may be discover
 
 ## Home Assistant devices and Areas
 
-The Xiaomi integration obtains gateway MQTT identity independently and uses the shared Device Registry identifier `("esp32", device_id)`. If `esp32_ota` is installed, both integrations enrich the same gateway entry rather than creating separate devices. Firmware uses Platform Core MQTT Discovery to create a separate HA device for each Xiaomi sensor and three entities: temperature, humidity and battery. Unknown measurements remain `unknown` until the sensor reports them.
+The Xiaomi integration obtains gateway MQTT identity independently and uses the shared Device Registry identifier `("esp32", device_id)`. If `esp32_ota` is installed, both integrations enrich the same gateway entry rather than creating separate devices. The Xiaomi integration creates a child HA device for each MAC in the retained `registry`, with three entities: temperature, humidity and battery. The child `device_info` sets `via_device` to the shared ESP32 identifier `("esp32", device_id)`. When a MAC disappears from the registry, the integration removes its sensor entities and device. Unknown measurements remain `unknown` until the sensor reports them.
 
-The current Platform Core implementation does not emit `via_device`, so no parent relationship between sensor and gateway is created in the device registry. The Xiaomi integration must not invent a parallel relationship mechanism.
+The integration subscribes to `esp32/+/xiaomi/sensor/+/state`. Retained measurements may arrive before the registry snapshot or gateway identity; the implementation must cache them and apply them once the required information is available. Sensor availability follows the gateway availability.
 
 Areas are not sent over MQTT or stored in firmware. Users assign Areas through native Home Assistant functionality.
 
@@ -117,7 +109,7 @@ Areas are not sent over MQTT or stored in firmware. Users assign Areas through n
 - Validate the MAC and key representation before publishing.
 - Address each command only to the selected gateway.
 - MQTT commands use `retain=false`.
-- Do not keep the key in long-lived integration or card state after submission.
+- Do not keep the key in long-lived integration or panel state after submission.
 
 ## MQTT contract
 
@@ -126,18 +118,20 @@ MQTT v1 is agreed and implemented by the firmware. Specifications:
 - [MQTT protocol v1 — RU](docs/MQTT_PROTOCOL_RU.md)
 - [MQTT protocol v1 — EN](docs/MQTT_PROTOCOL_EN.md)
 
-The contract defines topics, payloads, retained snapshots, add/remove commands, results, measurements, reconnect behavior, security and the Platform Core HA entity-registry limit. The integration must follow both the specification and the actual firmware behavior.
+The contract defines topics, payloads, retained snapshots, add/remove commands, results, measurements, reconnect behavior and security. Xiaomi entities are created by the HA integration, not by firmware MQTT Discovery. The integration must follow both the specification and the actual firmware behavior.
 
-## Lovelace card
+## Xiaomi Sensor Manager panel
 
-The UI lives in [esp32-card](https://github.com/lavrenovalexsandr-cmyk/esp32-card). The Xiaomi Sensor Manager must:
+The panel is included in this integration repository, registered as a Home Assistant custom panel and restricted to administrators. It must:
 
 1. allow selection of an ESP32 gateway known to the Xiaomi integration through MQTT identity, regardless of whether `esp32_ota` is installed;
 2. show discovered and saved sensors for the selected gateway;
 3. mark saved sensors as **Save** and new sensors as **New**;
 4. provide a bind-key field only for adding;
-5. allow removal of a saved sensor from the same card;
+5. allow removal of a saved sensor from the same panel;
 6. call `esp32_xiaomi_lywsd03.add_sensor` and `esp32_xiaomi_lywsd03.remove_sensor`.
+
+The panel reads state through the integration's WebSocket API and calls its services. It does not communicate with the MQTT broker directly.
 
 After removal, a sensor remains in the combined list if it is still discovered; only its status changes from **Save** to **New**.
 
@@ -147,8 +141,9 @@ After removal, a sensor remains in the combined list if it is still discovered; 
 2. Per-gateway snapshot state and recovery from retained snapshots — implemented.
 3. Add/remove services, validation, command-result correlation and cross-gateway MAC locking — implemented.
 4. WebSocket state API and events for the Xiaomi Sensor Manager — implemented.
-5. Xiaomi Sensor Manager card — tracked separately in the esp32-card repository.
-6. Runtime verification with multiple gateways, offline/reconnect, QoS 1 redelivery and Areas remains.
+5. HA sensor entities and child devices from retained registry — implemented; runtime verification in Home Assistant is pending.
+6. Xiaomi Sensor Manager panel bundled with the integration — implemented; runtime verification in Home Assistant is pending.
+7. Runtime verification with multiple gateways, offline/reconnect, QoS 1 redelivery, dynamic entity removal and Areas remains.
 
 ## Related projects
 

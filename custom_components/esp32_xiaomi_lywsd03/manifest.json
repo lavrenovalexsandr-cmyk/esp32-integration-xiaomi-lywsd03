@@ -6,7 +6,9 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "mqtt"
+    "http",
+    "mqtt",
+    "panel_custom"
   ],
   "documentation": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-lywsd03",
   "integration_type": "hub",

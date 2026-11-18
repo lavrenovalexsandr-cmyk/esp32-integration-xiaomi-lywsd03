@@ -1,7 +1,7 @@
 # Xiaomi LYWSD03MMC MQTT Protocol
 
 - Protocol version: **1**
-- Status: agreed specification for implementation
+- Status: agreed MQTT v1 contract; HA entity lifecycle is owned by the integration
 - Scope: communication between an ESP32 gateway and Home Assistant for Xiaomi LYWSD03MMC BLE sensors
 
 ## 1. General rules
@@ -121,11 +121,11 @@ Only measurements actually received and successfully decrypted are published. A 
 
 The gateway publishes an update when new valid measurements arrive. The message is retained so Home Assistant receives the latest value after reconnecting.
 
-Home Assistant creates separate temperature, humidity and battery entities. Units and device classes are configured in HA Discovery, not duplicated in the JSON.
+The Home Assistant integration subscribes to this topic and creates separate temperature, humidity and battery entities based on the registry. Units, device classes and state classes are configured by the integration; firmware does not publish Xiaomi MQTT Discovery.
 
 Sensor entity availability inherits the availability of its gateway. Version 1 does not introduce a per-sensor availability topic. Gateway availability therefore does not guarantee that an individual sensor has transmitted recently.
 
-When a sensor is removed, the gateway deletes its retained state topic by publishing an empty retained payload and removes its HA Discovery components.
+When a sensor is removed, the gateway deletes its retained state topic by publishing an empty retained payload. The Home Assistant integration removes the corresponding HA entities and child device after receiving the updated registry.
 
 ## 5. Add command
 
@@ -180,7 +180,7 @@ Removal is addressed to one specific gateway. On successful removal:
 
 1. the sensor entry is removed from NVS/the registry;
 2. an updated `registry` is published;
-3. retained state and HA Discovery for the sensor are removed;
+3. the retained sensor state is removed;
 4. if the sensor is still detected, it remains in or reappears in `discovered`.
 
 Removing a sensor that is not present returns `not_found`.
@@ -237,20 +237,20 @@ A MAC address may be saved in the registry of only one gateway at a time.
 
 A retained registry from an offline gateway still counts: losing connectivity does not release the MAC.
 
-## 9. Home Assistant Discovery and identity
+## 9. Home Assistant devices and entities
 
-- Use Platform Core's standard device discovery through `platform_ha`; the Xiaomi integration does not define a separate custom discovery protocol.
-- Each sensor has its own HA device and three entities: temperature, humidity and battery.
-- Sensor identifiers are derived stably from the gateway identity and sensor MAC so identical MACs on different gateways cannot collide in device/entity IDs.
-- Sensor entities use the gateway availability topic: `esp32/<DEVICE_ID>/availability`.
+- Xiaomi measurement entities are not created through MQTT Discovery and are not registered in Platform Core.
+- The Home Assistant integration creates a separate child device and three entities (temperature, humidity, battery) for every MAC in the retained `registry`.
+- Child device and entity identifiers are derived from the gateway `DEVICE_ID` and sensor MAC so identical MACs on different gateways cannot collide.
+- The child `device_info` sets `via_device=("esp32", DEVICE_ID)`, linking it to the shared gateway device.
+- The integration subscribes to `esp32/+/xiaomi/sensor/+/state`, validates payload versions and values, and caches the latest measurements until the corresponding registry/identity information is available.
+- Entity availability follows `esp32/<DEVICE_ID>/availability`. This indicates gateway availability, not proof of recent BLE communication with the sensor.
+- When a MAC disappears from the registry, the integration removes its three entities and child device. If the MAC appears again, they are created again.
 - Rooms/Areas are not sent over MQTT. Users assign Areas through Home Assistant.
-- The current Platform Core `platform_ha` implementation does not emit `via_device` in device discovery. Linking a sensor to its parent gateway using `via_device` requires a separate Core enhancement; until then, the sensor remains an independent HA device.
 
 ## 10. Implementation limits
 
-The Xiaomi driver supports a registry of up to 16 sensors per gateway. However, the current `PLATFORM_HA_MAX_ENTITIES` in Platform Core is 32. Three entities per sensor can make the HA entity limit restrictive before the driver limit is reached, especially when gateway entities are included.
-
-This does not change the MQTT contract. Before enabling the full driver capacity, the Platform Core capacity must be addressed separately by increasing the limit or revising entity registration. The current HA limit must not be assumed to support all 16 sensors.
+The Xiaomi driver supports a registry of up to 16 sensors per gateway. Firmware also maintains a latest-measurement cache for 16 sensors. After migration to HA-managed entities, `PLATFORM_HA_MAX_ENTITIES` in Platform Core no longer limits Xiaomi entities because they are not registered in Platform Core. The driver registry limit and firmware measurement-cache capacity remain independent constraints and must be verified separately. The MQTT protocol does not promise support beyond the capacity of the driver and firmware.
 
 ## 11. Reconnect and startup
 
@@ -263,7 +263,7 @@ Gateway availability is published by the universal Platform Core at `esp32/<DEVI
 ## 12. Security
 
 - The bind-key is sent only in the add command.
-- The bind-key is never stored by the Home Assistant integration or card.
+- The bind-key is never stored by the Home Assistant integration or panel.
 - The bind-key is never included in retained messages.
 - Firmware never logs the key and clears temporary buffers after use.
 - Command topics should be writable only by trusted Home Assistant/clients; gateways read commands and publish their own state.
