@@ -1,4 +1,4 @@
-"""Config flow for the Xiaomi Sensor Manager integration."""
+"""Config flow for the ESP32 Xiaomi Sensor Manager integration."""
 from __future__ import annotations
 
 import voluptuous as vol
@@ -18,7 +18,7 @@ class Esp32XiaomiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="already_configured")
         if user_input is not None:
             return self.async_create_entry(
-                title="Xiaomi Sensor Manager",
+                title="ESP32 Xiaomi Sensor Manager",
                 data={},
             )
         return self.async_show_form(step_id="user", data_schema=vol.Schema({}))
