@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Xiaomi Sensor Manager",
+        "title": "ESP32 Xiaomi Sensor Manager",
         "description": "Шлюзы автоматически обнаруживаются через настроенную интеграцию MQTT в Home Assistant."
       }
     },
