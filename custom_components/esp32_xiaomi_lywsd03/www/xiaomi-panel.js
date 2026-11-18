@@ -70,7 +70,20 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         p { color:var(--secondary-text-color); line-height:1.5; }
         .card { background:var(--card-background-color); border-radius:12px; padding:20px; box-shadow:var(--ha-card-box-shadow, 0 2px 8px #0002); }
         label { display:block; font-size:14px; margin:16px 0 6px; }
-        select, input { box-sizing:border-box; width:100%; min-height:44px; padding:8px 12px; border:1px solid var(--outline-color); border-radius:8px; background:var(--input-fill-color, var(--card-background-color)); color:var(--primary-text-color); font:inherit; }
+        input { box-sizing:border-box; width:100%; min-height:44px; padding:8px 12px; border:1px solid var(--outline-color); border-radius:8px; background:var(--input-fill-color, var(--card-background-color)); color:var(--primary-text-color); font:inherit; }
+        .picker { position:relative; width:100%; }
+        .picker-trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:48px; padding:8px 12px; border:1px solid var(--outline-color); border-radius:8px; background:var(--input-fill-color, var(--card-background-color)); color:var(--primary-text-color); text-align:left; font:inherit; }
+        .picker-trigger:focus-visible, .picker-option:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; }
+        .picker-trigger:disabled { opacity:.5; cursor:not-allowed; }
+        .picker-current, .picker-option-main { display:flex; align-items:center; gap:10px; min-width:0; }
+        .picker-name { overflow-wrap:anywhere; }
+        .picker-chevron { color:var(--secondary-text-color); flex:none; }
+        .picker-menu { position:absolute; z-index:10; top:calc(100% + 4px); left:0; right:0; max-height: min(320px, 50vh); overflow-y:auto; padding:5px; border:1px solid var(--outline-color); border-radius:10px; background:var(--card-background-color); box-shadow:var(--ha-card-box-shadow, 0 4px 14px #0003); }
+        .picker-menu[hidden] { display:none; }
+        .picker-option { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:10px; border:0; border-radius:7px; background:transparent; color:var(--primary-text-color); text-align:left; font:inherit; cursor:pointer; }
+        .picker-option:hover, .picker-option[aria-selected="true"] { background:var(--secondary-background-color); }
+        .picker-option-label { min-width:0; overflow-wrap:anywhere; }
+        .picker-empty { padding:12px; color:var(--secondary-text-color); font-size:14px; }
         .status { margin-top:14px; color:var(--secondary-text-color); font-size:14px; }
         .tag { display:inline-flex; align-items:center; border-radius:16px; padding:4px 11px; font-size:12px; font-weight:600; line-height:1.4; }
         .tag.online, .tag.saved { color:var(--success-color); background:color-mix(in srgb, var(--success-color) 14%, transparent); }
@@ -93,11 +106,11 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         <p>Управление BLE-датчиками Xiaomi LYWSD03MMC через ESP32-шлюзы.</p>
         <div class="card">
           <label for="gateway">ESP32-шлюз</label>
-          <select id="gateway"></select>
+          <div id="gateway-picker" class="picker"></div>
           <div id="gateway-status" class="status status-line"></div>
 
           <label for="sensor">Датчик</label>
-          <select id="sensor"></select>
+          <div id="sensor-picker" class="picker"></div>
           <div id="sensor-status" class="status status-line"></div>
 
           <div id="key-row">
@@ -114,15 +127,6 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       </div>
     `;
 
-    this.shadowRoot.getElementById("gateway").addEventListener("change", (event) => {
-      this._selectedGateway = event.target.value;
-      this._selectedMac = "";
-      this._renderData();
-    });
-    this.shadowRoot.getElementById("sensor").addEventListener("change", (event) => {
-      this._selectedMac = event.target.value;
-      this._renderSelection();
-    });
     this.shadowRoot.getElementById("add").addEventListener("click", () => this._addSensor());
     this.shadowRoot.getElementById("remove").addEventListener("click", () => this._removeSensor());
     this.shadowRoot.getElementById("refresh").addEventListener("click", () => this._loadState());
@@ -149,40 +153,149 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     }));
   }
 
+  _renderDropdown(containerId, items, selectedValue, onSelect, disabled) {
+    const container = this.shadowRoot.getElementById(containerId);
+    if (!container) return;
+    container.replaceChildren();
+
+    const selected = items.find((item) => item.value === selectedValue);
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "picker-trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.disabled = Boolean(disabled);
+    const current = document.createElement("span");
+    current.className = "picker-current";
+    const currentLabel = document.createElement("span");
+    currentLabel.className = "picker-name";
+    currentLabel.textContent = selected?.label || (items.length ? "Выберите..." : "Нет доступных вариантов");
+    current.append(currentLabel);
+    if (selected) this._appendPickerBadges(current, selected);
+    const chevron = document.createElement("span");
+    chevron.className = "picker-chevron";
+    chevron.textContent = "▾";
+    trigger.append(current, chevron);
+
+    const menu = document.createElement("div");
+    menu.className = "picker-menu";
+    menu.setAttribute("role", "listbox");
+    menu.hidden = true;
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "Нет доступных вариантов";
+      menu.append(empty);
+    }
+    for (const item of items) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "picker-option";
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(item.value === selectedValue));
+      const label = document.createElement("span");
+      label.className = "picker-option-label";
+      label.textContent = item.label;
+      const main = document.createElement("span");
+      main.className = "picker-option-main";
+      main.append(label);
+      const badges = document.createElement("span");
+      badges.className = "status-line";
+      this._appendPickerBadges(badges, item);
+      option.append(main, badges);
+      option.addEventListener("click", () => {
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+        onSelect(item.value);
+      });
+      menu.append(option);
+    }
+
+    trigger.addEventListener("click", () => {
+      const opening = menu.hidden;
+      this.shadowRoot.querySelectorAll(".picker-menu").forEach((other) => { other.hidden = true; });
+      this.shadowRoot.querySelectorAll(".picker-trigger").forEach((other) => other.setAttribute("aria-expanded", "false"));
+      menu.hidden = !opening;
+      trigger.setAttribute("aria-expanded", String(opening));
+    });
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+      } else if (event.key === "ArrowDown" && menu.hidden) {
+        event.preventDefault();
+        menu.hidden = false;
+        trigger.setAttribute("aria-expanded", "true");
+        menu.querySelector(".picker-option")?.focus();
+      }
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+        trigger.focus();
+      }
+    });
+    container.append(trigger, menu);
+  }
+
+  _appendPickerBadges(target, item) {
+    if (item.availability) {
+      const availability = document.createElement("span");
+      availability.className = `tag ${item.availability}`;
+      availability.textContent = item.availabilityText;
+      target.append(availability);
+    }
+    if (item.registry) {
+      const registry = document.createElement("span");
+      registry.className = `tag ${item.registry}`;
+      registry.textContent = item.registryText;
+      target.append(registry);
+    }
+    if (item.detail) {
+      const detail = document.createElement("span");
+      detail.className = "status-note";
+      detail.textContent = item.detail;
+      target.append(detail);
+    }
+  }
+
   _renderData() {
     if (!this.shadowRoot.firstElementChild) this._render();
-    const gatewaySelect = this.shadowRoot.getElementById("gateway");
-    const sensorSelect = this.shadowRoot.getElementById("sensor");
-    gatewaySelect.replaceChildren();
-    for (const gateway of this._gateways) {
-      const known = gateway.availability_received !== false;
-      const online = Boolean(gateway.available);
-      const status = known ? (online ? "Online" : "Offline") : "Unknown";
-      const option = new Option(`${gateway.name} (${gateway.device_id}) — ${status}`, gateway.device_id);
-      option.style.color = known
-        ? (online ? "var(--success-color)" : "var(--error-color)")
-        : "var(--secondary-text-color)";
-      gatewaySelect.add(option);
-    }
-    gatewaySelect.value = this._selectedGateway;
     const gateway = this._selectedGatewayData();
+    const gatewayItems = this._gateways.map((item) => {
+      const known = item.availability_received !== false;
+      return {
+        value: item.device_id,
+        label: `${item.name} (${item.device_id})`,
+        availability: known ? (item.available ? "online" : "offline") : "unknown",
+        availabilityText: known ? (item.available ? "Online" : "Offline") : "Unknown"
+      };
+    });
+    this._renderDropdown("gateway-picker", gatewayItems, this._selectedGateway, (value) => {
+      this._selectedGateway = value;
+      this._selectedMac = "";
+      this._renderData();
+    }, this._gateways.length === 0);
+
     const options = this._sensorOptions(gateway);
     if (!options.some((item) => item.mac === this._selectedMac)) {
       this._selectedMac = options[0]?.mac || "";
     }
-    sensorSelect.replaceChildren();
-    for (const item of options) {
-      const status = !gateway?.registry_received
-        ? "…"
-        : `${item.online ? "Online" : "Offline"} — ${item.saved ? "Save" : "New"}`;
-      const rssi = Number.isInteger(item.rssi) ? ` · RSSI ${item.rssi} dBm` : "";
-      const option = new Option(`${item.mac} — ${status}${rssi}`, item.mac);
-      option.style.color = item.online
-        ? "var(--success-color)"
-        : "var(--error-color)";
-      sensorSelect.add(option);
-    }
-    sensorSelect.value = this._selectedMac;
+    const sensorItems = options.map((item) => ({
+      value: item.mac,
+      label: item.mac,
+      availability: item.online ? "online" : "offline",
+      availabilityText: item.online ? "Online" : "Offline",
+      registry: item.saved ? "saved" : "new",
+      registryText: item.saved ? "Save" : "New",
+      detail: Number.isInteger(item.rssi) ? `RSSI ${item.rssi} dBm` : ""
+    }));
+    this._renderDropdown("sensor-picker", sensorItems, this._selectedMac, (value) => {
+      this._selectedMac = value;
+      this._renderSelection();
+    }, options.length === 0);
+
     const gatewayStatus = this.shadowRoot.getElementById("gateway-status");
     gatewayStatus.replaceChildren();
     if (gateway) {
@@ -235,8 +348,10 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this.shadowRoot.getElementById("key-row").hidden = saved || !selected;
     this.shadowRoot.getElementById("add").hidden = saved || !selected;
     this.shadowRoot.getElementById("remove").hidden = !saved;
-    this.shadowRoot.getElementById("gateway").disabled = this._gateways.length === 0;
-    this.shadowRoot.getElementById("sensor").disabled = !selected;
+    const gatewayTrigger = this.shadowRoot.querySelector("#gateway-picker .picker-trigger");
+    const sensorTrigger = this.shadowRoot.querySelector("#sensor-picker .picker-trigger");
+    if (gatewayTrigger) gatewayTrigger.disabled = this._gateways.length === 0;
+    if (sensorTrigger) sensorTrigger.disabled = !selected;
     this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available || !gateway?.registry_received;
     this.shadowRoot.getElementById("remove").disabled = this._busy || !saved || !gateway?.available || !gateway?.registry_received;
   }
