@@ -1,4 +1,4 @@
-# Xiaomi Sensor Manager
+# ESP32 Xiaomi Sensor Manager
 
 A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC BLE sensors.
 
@@ -9,9 +9,9 @@ A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC
 1. Open **HACS → Integrations**.
 2. Open the top-right menu and select **Custom repositories**.
 3. Add `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` with category **Integration**.
-4. Find and install **Xiaomi Sensor Manager**.
+4. Find and install **ESP32 Xiaomi Sensor Manager**.
 5. Restart Home Assistant.
-6. Go to **Settings → Devices & services → Add integration** and add **Xiaomi Sensor Manager**.
+6. Go to **Settings → Devices & services → Add integration** and add **ESP32 Xiaomi Sensor Manager**.
 
 Configure the standard Home Assistant **MQTT** integration separately and make sure the broker is connected to the ESP32 gateways. This integration reuses the configured MQTT connection; it does not need broker credentials in its own config flow.
 
