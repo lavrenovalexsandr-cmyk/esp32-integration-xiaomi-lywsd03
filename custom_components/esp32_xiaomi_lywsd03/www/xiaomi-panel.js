@@ -7,6 +7,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._selectedGateway = "";
     this._selectedMac = "";
     this._unsubscribe = null;
+    this._statusTimer = null;
     this._loading = false;
     this._busy = false;
   }
@@ -21,12 +22,20 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._render();
     this._ensureSubscription();
     this._loadState();
+    if (this._statusTimer) clearInterval(this._statusTimer);
+    this._statusTimer = setInterval(() => {
+      if (this.isConnected) this._renderData();
+    }, 15000);
   }
 
   disconnectedCallback() {
     if (this._unsubscribe) {
       this._unsubscribe();
       this._unsubscribe = null;
+    }
+    if (this._statusTimer) {
+      clearInterval(this._statusTimer);
+      this._statusTimer = null;
     }
   }
 
@@ -137,16 +146,31 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const discovered = Array.isArray(gateway.discovered) ? gateway.discovered : [];
     const registry = Array.isArray(gateway.registry) ? gateway.registry : [];
     const saved = new Set(registry);
-    const online = new Set(discovered.map((item) => item.mac));
+    const lastSeen = gateway.sensor_last_seen && typeof gateway.sensor_last_seen === "object"
+      ? gateway.sensor_last_seen : {};
     const items = new Map();
     for (const item of discovered) items.set(item.mac, item);
     for (const mac of registry) if (!items.has(mac)) items.set(mac, { mac });
-    return [...items.values()].sort((a, b) => a.mac.localeCompare(b.mac)).map((item) => ({
-      mac: item.mac,
-      online: online.has(item.mac),
-      saved: saved.has(item.mac),
-      rssi: item.rssi
-    }));
+    return [...items.values()].sort((a, b) => a.mac.localeCompare(b.mac)).map((item) => {
+      const isSaved = saved.has(item.mac);
+      let availability = null;
+      if (isSaved) {
+        const seen = Number(lastSeen[item.mac]);
+        if (gateway.availability_received && !gateway.available) {
+          availability = "offline";
+        } else if (Number.isFinite(seen) && seen > 0) {
+          availability = Date.now() / 1000 - seen < 300 ? "online" : "offline";
+        } else {
+          availability = "unknown";
+        }
+      }
+      return {
+        mac: item.mac,
+        availability,
+        saved: isSaved,
+        rssi: item.rssi
+      };
+    });
   }
 
   _renderDropdown(containerId, items, selectedValue, onSelect, disabled) {
@@ -281,8 +305,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const sensorItems = options.map((item) => ({
       value: item.mac,
       label: item.mac,
-      availability: item.online ? "online" : "offline",
-      availabilityText: item.online ? "Online" : "Offline",
+      availability: item.availability,
+      availabilityText: item.availability === "online" ? "Online"
+        : item.availability === "offline" ? "Offline" : "Unknown",
       registry: item.saved ? "saved" : "new",
       registryText: item.saved ? "Save" : "New",
       detail: Number.isInteger(item.rssi) ? `RSSI ${item.rssi} dBm` : ""
