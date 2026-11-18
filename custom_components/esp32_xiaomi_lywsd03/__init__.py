@@ -1,4 +1,4 @@
-"""Home Assistant integration for Xiaomi Sensor Manager."""
+"""Home Assistant integration for ESP32 Xiaomi Sensor Manager."""
 from __future__ import annotations
 
 import asyncio
