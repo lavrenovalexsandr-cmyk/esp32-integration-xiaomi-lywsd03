@@ -106,7 +106,14 @@ class XiaomiMeasurementSensor(SensorEntity):
         """Return the latest retained measurement, if known."""
         state = self._data[DATA_MEASUREMENTS].get((self._device_id, self._mac), {})
         value = state.get(self.entity_description.key)
-        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        # Xiaomi humidity and temperature measurements have one decimal
+        # place of meaningful precision. Normalize binary float artifacts
+        # such as 35.5999984741211 before exposing the state to Home Assistant.
+        if self.entity_description.key in ("temperature", "humidity"):
+            return round(value, 1)
+        return value
 
 
 async def async_setup_entry(
