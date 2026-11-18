@@ -84,7 +84,6 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .picker-option:hover, .picker-option[aria-selected="true"] { background:var(--secondary-background-color); }
         .picker-option-label { min-width:0; overflow-wrap:anywhere; }
         .picker-empty { padding:12px; color:var(--secondary-text-color); font-size:14px; }
-        .status { margin-top:14px; color:var(--secondary-text-color); font-size:14px; }
         .tag { display:inline-flex; align-items:center; border-radius:16px; padding:4px 11px; font-size:12px; font-weight:600; line-height:1.4; }
         .tag.online, .tag.saved { color:var(--success-color); background:color-mix(in srgb, var(--success-color) 14%, transparent); }
         .tag.offline { color:var(--error-color); background:color-mix(in srgb, var(--error-color) 14%, transparent); }
@@ -95,6 +94,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .actions { display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }
         button { border:0; border-radius:8px; padding:10px 18px; min-height:40px; font:inherit; cursor:pointer; background:var(--primary-color); color:var(--text-primary-color, white); }
         button.secondary { background:var(--secondary-background-color); color:var(--primary-text-color); }
+        button.danger { background:var(--error-color); color:var(--text-primary-color, white); }
         button:disabled { opacity:.45; cursor:not-allowed; }
         .message { min-height:22px; margin-top:14px; color:var(--success-color); overflow-wrap:anywhere; }
         .message.error { color:var(--error-color); }
@@ -107,19 +107,15 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         <div class="card">
           <label for="gateway">ESP32-шлюз</label>
           <div id="gateway-picker" class="picker"></div>
-          <div id="gateway-status" class="status status-line"></div>
-
           <label for="sensor">Датчик</label>
           <div id="sensor-picker" class="picker"></div>
-          <div id="sensor-status" class="status status-line"></div>
-
           <div id="key-row">
             <label for="bind-key">Bind Key (32 hex-символа)</label>
             <input id="bind-key" type="password" autocomplete="off" spellcheck="false" maxlength="32" placeholder="0123456789ABCDEF0123456789ABCDEF">
           </div>
           <div class="actions">
             <button id="add">Добавить датчик</button>
-            <button id="remove" class="secondary">Удалить датчик</button>
+            <button id="remove" class="danger">Удалить датчик</button>
             <button id="refresh" class="secondary">Обновить</button>
           </div>
           <div id="message" class="message" role="status" aria-live="polite"></div>
@@ -296,24 +292,6 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       this._renderSelection();
     }, options.length === 0);
 
-    const gatewayStatus = this.shadowRoot.getElementById("gateway-status");
-    gatewayStatus.replaceChildren();
-    if (gateway) {
-      const badge = document.createElement("span");
-      const known = gateway.availability_received !== false;
-      const online = Boolean(gateway.available);
-      badge.className = `tag ${known ? (online ? "online" : "offline") : "unknown"}`;
-      badge.textContent = known ? (online ? "Online" : "Offline") : "Unknown";
-      gatewayStatus.append(badge);
-      if (!gateway.registry_received) {
-        const note = document.createElement("span");
-        note.className = "status-note";
-        note.textContent = "Ожидается retained registry";
-        gatewayStatus.append(note);
-      }
-    } else {
-      gatewayStatus.textContent = "Нет обнаруженных ESP32-шлюзов";
-    }
     this._renderSelection();
   }
 
@@ -321,30 +299,6 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const gateway = this._selectedGatewayData();
     const selected = this._sensorOptions(gateway).find((item) => item.mac === this._selectedMac);
     const saved = Boolean(selected?.saved);
-    const sensorStatus = this.shadowRoot.getElementById("sensor-status");
-    sensorStatus.replaceChildren();
-    if (selected && gateway?.registry_received) {
-      const availabilityBadge = document.createElement("span");
-      availabilityBadge.className = `tag ${selected.online ? "online" : "offline"}`;
-      availabilityBadge.textContent = selected.online ? "Online" : "Offline";
-      sensorStatus.append(availabilityBadge);
-
-      const registryBadge = document.createElement("span");
-      registryBadge.className = `tag ${saved ? "saved" : "new"}`;
-      registryBadge.textContent = saved ? "Save" : "New";
-      sensorStatus.append(registryBadge);
-
-      const note = document.createElement("span");
-      note.className = "status-note";
-      note.textContent = saved
-        ? (selected.online ? "Датчик сохранён и обнаруживается шлюзом" : "Датчик сохранён, но сейчас не обнаруживается")
-        : (selected.online ? "Датчик обнаружен, но не сохранён" : "Датчик не обнаруживается шлюзом");
-      sensorStatus.append(note);
-    } else if (selected) {
-      sensorStatus.textContent = "Ожидается синхронизация реестра шлюза.";
-    } else {
-      sensorStatus.textContent = "Нет доступных датчиков. Убедитесь, что шлюз обнаруживает BLE-рекламу.";
-    }
     this.shadowRoot.getElementById("key-row").hidden = saved || !selected;
     this.shadowRoot.getElementById("add").hidden = saved || !selected;
     this.shadowRoot.getElementById("remove").hidden = !saved;
