@@ -140,7 +140,7 @@ MQTT v1 согласован и реализован на стороне firmwar
 1. Основа HA-интеграции, config flow и подписки на MQTT v1 — реализованы.
 2. Раздельное состояние snapshots по шлюзам и восстановление из retained snapshots — реализованы.
 3. Add/remove services, проверка MAC между шлюзами и корреляция command/result — реализованы.
-4. WebSocket API состояния и события для Xiaomi Sensor Manager — реализованы.
+4. WebSocket API состояния и события для ESP32 Xiaomi Sensor Manager — реализованы.
 5. Создание HA sensor entities и дочерних устройств по retained registry — реализовано; проверка в работающем HA ожидается.
 6. Панель Xiaomi Sensor Manager в составе интеграции — реализована; проверка в работающем HA ожидается.
 7. Требуется эксплуатационная проверка нескольких шлюзов, offline/reconnect, повторной доставки QoS 1, динамического удаления сущностей и Areas.
