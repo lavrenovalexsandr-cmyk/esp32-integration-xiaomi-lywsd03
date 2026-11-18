@@ -396,7 +396,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
   async _waitForSensorDevice(deviceId, mac) {
     const identifier = `${deviceId}_${mac.replace(/:/g, "")}`;
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const devices = await this._hass.callWS({ type: "config/device_registry/list" });
+      const response = await this._hass.callWS({ type: "config/device_registry/list" });
+      const devices = Array.isArray(response) ? response : response.devices || [];
       const found = devices.find((device) =>
         Array.isArray(device.identifiers) &&
         device.identifiers.some((item) =>
@@ -412,7 +413,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
   }
 
   async _openDeviceSetup(device) {
-    const areas = await this._hass.callWS({ type: "config/area_registry/list" });
+    const response = await this._hass.callWS({ type: "config/area_registry/list" });
+    const areas = Array.isArray(response) ? response : response.areas || [];
     const select = this.shadowRoot.getElementById("device-area");
     select.replaceChildren();
     const none = document.createElement("option");
