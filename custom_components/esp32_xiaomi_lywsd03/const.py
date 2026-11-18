@@ -1,4 +1,4 @@
-"""Constants for the ESP32 Xiaomi LYWSD03MMC integration."""
+"""Constants for the Xiaomi Sensor Manager integration."""
 
 DOMAIN = "esp32_xiaomi_lywsd03"
 DEVICE_IDENTIFIER_NAMESPACE = "esp32"
