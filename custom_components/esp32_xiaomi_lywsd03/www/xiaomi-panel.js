@@ -466,7 +466,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         device_id: gateway.device_id,
         mac: this._selectedMac
       });
-      this._showMessage("Локальная запись датчика удалена. Команда очистки шлюза отправлена, если он доступен.", false);
+      this._showMessage("Локальная запись датчика удалена. Очистка шлюза выполняется в фоне, если он доступен.", false);
       await this._loadState();
     } catch (error) {
       this._showMessage(this._errorText(error), true);
