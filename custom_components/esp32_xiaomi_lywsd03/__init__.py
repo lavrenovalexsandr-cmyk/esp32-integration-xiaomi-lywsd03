@@ -653,6 +653,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             str(call.data["bind_key"]),
         )
 
+    async def best_effort_remove_from_gateway(
+        device_id: str, mac: str
+    ) -> None:
+        """Try to clean the gateway asynchronously without blocking local removal."""
+        try:
+            await send_command("remove", device_id, mac)
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Local removal of Xiaomi sensor %s from ESP32 %s succeeded, "
+                "but gateway cleanup was not confirmed: %s",
+                mac,
+                device_id,
+                err,
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Local removal of Xiaomi sensor %s succeeded, "
+                "but gateway cleanup failed",
+                mac,
+            )
+
     async def handle_remove_sensor(call: ServiceCall) -> None:
         """Remove locally first; gateway cleanup is best-effort."""
         device_id = str(call.data["device_id"]).strip().upper()
@@ -670,35 +691,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Шлюз не зарегистрирован в Home Assistant. Удаление невозможно."
             )
 
-        # Commit the local removal before attempting any network operation.
-        # This removes entities/device and prevents stale MQTT snapshots from
-        # resurrecting the sensor after a restart.
-        data[DATA_REMOVED_SENSORS].add((device_id, mac))
+        # Persist the tombstone before changing runtime state. If storage fails,
+        # leave the sensor untouched so a restart cannot resurrect it.
+        removed_key = (device_id, mac)
+        data[DATA_REMOVED_SENSORS].add(removed_key)
+        try:
+            await save_removed_sensors()
+        except Exception:
+            data[DATA_REMOVED_SENSORS].discard(removed_key)
+            raise
+
         gateway["registry"].discard(mac)
         gateway["discovered"].pop(mac, None)
-        data[DATA_MEASUREMENTS].pop((device_id, mac), None)
-        data["last_measurements"].pop((device_id, mac), None)
+        data[DATA_MEASUREMENTS].pop(removed_key, None)
+        data["last_measurements"].pop(removed_key, None)
         async_reconcile_gateway(hass, entry, data, device_id)
-        await save_removed_sensors()
         _fire_state_updated(hass, device_id)
 
         if gateway["available"]:
-            try:
-                await send_command("remove", device_id, mac)
-            except HomeAssistantError as err:
-                _LOGGER.warning(
-                    "Local removal of Xiaomi sensor %s from ESP32 %s succeeded, "
-                    "but gateway cleanup was not confirmed: %s",
-                    mac,
-                    device_id,
-                    err,
-                )
-            except Exception:
-                _LOGGER.exception(
-                    "Local removal of Xiaomi sensor %s succeeded, "
-                    "but gateway cleanup failed",
-                    mac,
-                )
+            hass.async_create_task(best_effort_remove_from_gateway(device_id, mac))
 
     hass.services.async_register(
         DOMAIN,
