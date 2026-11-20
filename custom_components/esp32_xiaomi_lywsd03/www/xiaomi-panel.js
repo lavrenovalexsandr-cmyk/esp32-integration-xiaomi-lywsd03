@@ -4,6 +4,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._gateways = [];
+    this._deviceNames = new Map();
+    this._deviceNamesUpdatedAt = 0;
+    this._deviceNamesPromise = null;
     this._selectedGateway = "";
     this._selectedMac = "";
     this._unsubscribe = null;
@@ -20,6 +23,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._hass = hass;
     this._ensureSubscription();
     this._loadState();
+    this._loadDeviceNames();
   }
 
   connectedCallback() {
@@ -27,11 +31,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     document.addEventListener("pointerdown", this._onDocumentPointerDown, true);
     this._ensureSubscription();
     this._loadState();
+    this._loadDeviceNames();
     if (this._statusTimer) clearInterval(this._statusTimer);
-    this._statusTimer = setInterval(() => {
-      // Refresh the gateway name from the device registry as well as live status.
-      if (this.isConnected) this._loadState();
-    }, 15000);
+    this._statusTimer = setInterval(() => this._loadDeviceNames(), 30000);
   }
 
   disconnectedCallback() {
@@ -56,6 +58,39 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     } catch (error) {
       this._showMessage(this._errorText(error), true);
     }
+  }
+
+  async _loadDeviceNames() {
+    if (!this._hass || this._deviceNamesPromise ||
+        Date.now() - this._deviceNamesUpdatedAt < 30000) return;
+    this._deviceNamesPromise = (async () => {
+      try {
+        const devices = await this._hass.connection.sendMessagePromise({
+          type: "config/device_registry/list"
+        });
+        this._deviceNames = new Map();
+        for (const device of devices) {
+          const identifier = (device.identifiers || []).find(
+            ([namespace]) => namespace === "esp32"
+          );
+          if (identifier) {
+            const name = device.name_by_user || device.name;
+            if (name) this._deviceNames.set(String(identifier[1]).toUpperCase(), name);
+          }
+        }
+        for (const gateway of this._gateways) {
+          const name = this._deviceNames.get(String(gateway.device_id).toUpperCase());
+          if (name) gateway.name = name;
+        }
+      } catch (error) {
+        console.warn("Xiaomi Sensor Manager: unable to load device registry", error);
+      } finally {
+        this._deviceNamesUpdatedAt = Date.now();
+        this._deviceNamesPromise = null;
+        this._renderData();
+      }
+    })();
+    return this._deviceNamesPromise;
   }
 
   async _loadState() {
