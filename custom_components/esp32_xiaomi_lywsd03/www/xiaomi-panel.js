@@ -11,6 +11,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._loading = false;
     this._busy = false;
     this._setupDeviceId = null;
+    this._onDocumentPointerDown = (event) => {
+      if (!event.composedPath().includes(this)) this._closePickers();
+    };
   }
 
   set hass(hass) {
@@ -21,6 +24,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
 
   connectedCallback() {
     this._render();
+    document.addEventListener("pointerdown", this._onDocumentPointerDown, true);
     this._ensureSubscription();
     this._loadState();
     if (this._statusTimer) clearInterval(this._statusTimer);
@@ -30,6 +34,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
   }
 
   disconnectedCallback() {
+    document.removeEventListener("pointerdown", this._onDocumentPointerDown, true);
     if (this._unsubscribe) {
       this._unsubscribe();
       this._unsubscribe = null;
@@ -153,6 +158,9 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       </div>
     `;
 
+    this.shadowRoot.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest(".picker")) this._closePickers();
+    });
     this.shadowRoot.getElementById("add").addEventListener("click", () => this._addSensor());
     this.shadowRoot.getElementById("remove").addEventListener("click", () => this._removeSensor());
     this.shadowRoot.getElementById("refresh").addEventListener("click", () => this._loadState());
@@ -198,9 +206,23 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     });
   }
 
+  _closePickers() {
+    this.shadowRoot.querySelectorAll(".picker-menu").forEach((menu) => { menu.hidden = true; });
+    this.shadowRoot.querySelectorAll(".picker-trigger").forEach((trigger) => {
+      trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
   _renderDropdown(containerId, items, selectedValue, onSelect, disabled) {
     const container = this.shadowRoot.getElementById(containerId);
     if (!container) return;
+    const oldMenu = container.querySelector(".picker-menu");
+    const oldTrigger = container.querySelector(".picker-trigger");
+    const wasOpen = Boolean(oldMenu && !oldMenu.hidden);
+    const activeElement = this.shadowRoot.activeElement;
+    const focusedValue = activeElement?.classList.contains("picker-option")
+      ? activeElement.dataset.value : null;
+    const triggerHadFocus = activeElement === oldTrigger;
     container.replaceChildren();
 
     const selected = items.find((item) => item.value === selectedValue);
@@ -225,7 +247,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const menu = document.createElement("div");
     menu.className = "picker-menu";
     menu.setAttribute("role", "listbox");
-    menu.hidden = true;
+    menu.hidden = !wasOpen;
     if (!items.length) {
       const empty = document.createElement("div");
       empty.className = "picker-empty";
@@ -238,6 +260,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       option.className = "picker-option";
       option.setAttribute("role", "option");
       option.setAttribute("aria-selected", String(item.value === selectedValue));
+      option.dataset.value = item.value;
       const label = document.createElement("span");
       label.className = "picker-option-label";
       label.textContent = item.label;
@@ -281,7 +304,13 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         trigger.focus();
       }
     });
+    trigger.setAttribute("aria-expanded", String(wasOpen));
     container.append(trigger, menu);
+    if (focusedValue !== null && wasOpen) {
+      menu.querySelector(`.picker-option[data-value="${CSS.escape(focusedValue)}"]`)?.focus();
+    } else if (triggerHadFocus) {
+      trigger.focus();
+    }
   }
 
   _appendPickerBadges(target, item) {
