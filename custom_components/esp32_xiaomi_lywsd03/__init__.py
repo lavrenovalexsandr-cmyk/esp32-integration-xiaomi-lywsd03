@@ -757,7 +757,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             webcomponent_name=PANEL_WEB_COMPONENT,
             sidebar_title="Xiaomi Sensor Manager",
             sidebar_icon="mdi:bluetooth-connect",
-            module_url=f"{PANEL_STATIC_URL}?v=2",
+            module_url=f"{PANEL_STATIC_URL}?v=3",
             require_admin=True,
         )
         hass.data[DOMAIN]["_panel_registered"] = True
