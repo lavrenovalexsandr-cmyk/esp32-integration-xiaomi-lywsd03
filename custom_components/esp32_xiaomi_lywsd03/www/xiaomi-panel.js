@@ -219,6 +219,11 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     const oldMenu = container.querySelector(".picker-menu");
     const oldTrigger = container.querySelector(".picker-trigger");
     const wasOpen = Boolean(oldMenu && !oldMenu.hidden);
+
+    // Do not destroy an active picker while Home Assistant state updates arrive.
+    // Replacing its DOM during pointer interaction can cancel the click/focus sequence.
+    if (wasOpen && !disabled) return;
+
     const activeElement = this.shadowRoot.activeElement;
     const focusedValue = activeElement?.classList.contains("picker-option")
       ? activeElement.dataset.value : null;
