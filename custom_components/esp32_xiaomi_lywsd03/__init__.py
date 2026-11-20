@@ -19,6 +19,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.storage import Store
 
 from .const import (
     AVAILABILITY_TOPIC,
@@ -29,6 +30,7 @@ from .const import (
     DATA_MEASUREMENTS,
     DATA_PENDING,
     DATA_PENDING_ADDS,
+    DATA_REMOVED_SENSORS,
     DATA_SENSOR_ENTITIES,
     DATA_UNSUB,
     DEVICE_ID_PATTERN,
@@ -169,11 +171,26 @@ async def websocket_get_state(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Xiaomi integration entry."""
+    removed_store = Store(
+        hass, 1, f"{DOMAIN}_{entry.entry_id}_removed_sensors"
+    )
+    stored_removed = await removed_store.async_load()
+    removed_sensors: set[tuple[str, str]] = set()
+    if isinstance(stored_removed, dict):
+        for item in stored_removed.get("sensors", []):
+            if not isinstance(item, dict):
+                continue
+            device_id = str(item.get("device_id", "")).upper()
+            mac = str(item.get("mac", "")).upper()
+            if DEVICE_ID_RE.fullmatch(device_id) and MAC_RE.fullmatch(mac):
+                removed_sensors.add((device_id, mac))
+
     data: dict[str, Any] = {
         DATA_GATEWAYS: {},
         DATA_UNSUB: [],
         DATA_PENDING: {},
         DATA_PENDING_ADDS: {},
+        DATA_REMOVED_SENSORS: removed_sensors,
         "entry": entry,
         DATA_MEASUREMENTS: {},
         "last_measurements": {},
@@ -182,6 +199,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
     device_registry = dr.async_get(hass)
+
+    async def save_removed_sensors() -> None:
+        """Persist local removals so retained MQTT state cannot restore them."""
+        await removed_store.async_save(
+            {
+                "sensors": [
+                    {"device_id": gateway_id, "mac": mac}
+                    for gateway_id, mac in sorted(data[DATA_REMOVED_SENSORS])
+                ]
+            }
+        )
 
     def ensure_gateway(device_id: str) -> dict[str, Any]:
         """Return the runtime state for one gateway."""
@@ -298,7 +326,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         sensor["rssi"] = max(-127, min(20, rssi))
                     sensors[mac] = sensor
             if message_type == "registry":
-                gateway["registry"] = registry
+                # A gateway may publish a retained snapshot from before a local
+                # deletion. Keep that sensor hidden until the gateway confirms
+                # that its own registry no longer contains it.
+                removed = data[DATA_REMOVED_SENSORS]
+                confirmed_removed = {
+                    item for item in removed
+                    if item[0] == device_id and item[1] not in registry
+                }
+                if confirmed_removed:
+                    removed.difference_update(confirmed_removed)
+                    await save_removed_sensors()
+                gateway["registry"] = {
+                    mac for mac in registry
+                    if (device_id, mac) not in removed
+                }
                 gateway["registry_received"] = True
                 gateway["registry_revision"] += 1
                 for reserved_mac, reservation in list(data[DATA_PENDING_ADDS].items()):
@@ -379,6 +421,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not MAC_RE.fullmatch(mac):
             return
         key = (device_id, mac)
+        if key in data[DATA_REMOVED_SENSORS]:
+            # Ignore stale retained or live measurements from a locally removed
+            # sensor while its gateway has not yet confirmed registry cleanup.
+            return
         if not msg.payload:
             data[DATA_MEASUREMENTS].pop(key, None)
             data["last_measurements"].pop(key, None)
@@ -539,6 +585,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             status = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
             command_completed = True
             if action == "add" and status in ("success", "already_exists"):
+                # Explicitly adding the sensor again on this gateway cancels its
+                # local tombstone. Tombstones for other gateways remain intact.
+                removed_key = (device_id, mac)
+                if removed_key in data[DATA_REMOVED_SENSORS]:
+                    data[DATA_REMOVED_SENSORS].discard(removed_key)
+                    await save_removed_sensors()
+                gateway["registry"].add(mac)
+                async_reconcile_gateway(hass, entry, data, device_id)
                 reservation = data[DATA_PENDING_ADDS].get(mac)
                 if reservation is not None:
                     if mac in gateway["registry"]:
@@ -598,12 +652,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     async def handle_remove_sensor(call: ServiceCall) -> None:
-        """Handle remove_sensor service calls."""
-        await send_command(
-            "remove",
-            str(call.data["device_id"]),
-            str(call.data["mac"]),
-        )
+        """Remove locally first; gateway cleanup is best-effort."""
+        device_id = str(call.data["device_id"]).strip().upper()
+        mac = str(call.data["mac"]).strip().upper()
+        if not DEVICE_ID_RE.fullmatch(device_id):
+            raise HomeAssistantError("Некорректный ID ESP32.")
+        if not MAC_RE.fullmatch(mac):
+            raise HomeAssistantError(
+                "Укажите MAC датчика в формате AA:BB:CC:DD:EE:FF."
+            )
+
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        if gateway is None or not gateway["identity_received"]:
+            raise HomeAssistantError(
+                "Шлюз не зарегистрирован в Home Assistant. Удаление невозможно."
+            )
+
+        # Commit the local removal before attempting any network operation.
+        # This removes entities/device and prevents stale MQTT snapshots from
+        # resurrecting the sensor after a restart.
+        data[DATA_REMOVED_SENSORS].add((device_id, mac))
+        gateway["registry"].discard(mac)
+        data[DATA_MEASUREMENTS].pop((device_id, mac), None)
+        data["last_measurements"].pop((device_id, mac), None)
+        async_reconcile_gateway(hass, entry, data, device_id)
+        await save_removed_sensors()
+        _fire_state_updated(hass, device_id)
+
+        if gateway["available"]:
+            try:
+                await send_command("remove", device_id, mac)
+            except HomeAssistantError as err:
+                _LOGGER.warning(
+                    "Local removal of Xiaomi sensor %s from ESP32 %s succeeded, "
+                    "but gateway cleanup was not confirmed: %s",
+                    mac,
+                    device_id,
+                    err,
+                )
+            except Exception:
+                _LOGGER.exception(
+                    "Local removal of Xiaomi sensor %s succeeded, "
+                    "but gateway cleanup failed",
+                    mac,
+                )
 
     hass.services.async_register(
         DOMAIN,
