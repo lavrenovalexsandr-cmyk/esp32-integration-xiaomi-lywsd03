@@ -357,7 +357,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     if (gatewayTrigger) gatewayTrigger.disabled = this._gateways.length === 0;
     if (sensorTrigger) sensorTrigger.disabled = !selected;
     this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available || !gateway?.registry_received;
-    this.shadowRoot.getElementById("remove").disabled = this._busy || !saved || !gateway?.available || !gateway?.registry_received;
+    this.shadowRoot.getElementById("remove").disabled = this._busy || !saved;
   }
 
   async _addSensor() {
@@ -466,7 +466,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         device_id: gateway.device_id,
         mac: this._selectedMac
       });
-      this._showMessage("Команда удаления подтверждена шлюзом. Если датчик продолжает рекламироваться, он снова появится со статусом New.", false);
+      this._showMessage("Локальная запись датчика удалена. Команда очистки шлюза отправлена, если он доступен.", false);
       await this._loadState();
     } catch (error) {
       this._showMessage(this._errorText(error), true);
