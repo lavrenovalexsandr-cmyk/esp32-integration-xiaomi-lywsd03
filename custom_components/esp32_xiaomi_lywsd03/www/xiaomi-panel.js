@@ -29,7 +29,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._loadState();
     if (this._statusTimer) clearInterval(this._statusTimer);
     this._statusTimer = setInterval(() => {
-      if (this.isConnected) this._renderData();
+      // Refresh the gateway name from the device registry as well as live status.
+      if (this.isConnected) this._loadState();
     }, 15000);
   }
 
