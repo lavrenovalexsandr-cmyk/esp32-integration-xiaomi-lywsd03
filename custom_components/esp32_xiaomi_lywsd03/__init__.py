@@ -486,19 +486,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
 
-    def gateway_device_registry_updated(event: Any) -> None:
-        """Refresh the panel when a shared gateway device is renamed in Home Assistant."""
-        registry_device_id = event.data.get("device_id")
-        if not registry_device_id:
-            return
-        for device_id in data[DATA_GATEWAYS]:
-            gateway_device = device_registry.async_get_device(
-                identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)}
-            )
-            if gateway_device is not None and gateway_device.id == registry_device_id:
-                _fire_state_updated(hass, device_id)
-                break
-
     data[DATA_UNSUB] = [
         await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
         await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
@@ -506,7 +493,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, MEASUREMENTS_TOPIC, measurement_message, qos=1),
-        hass.bus.async_listen("device_registry_updated", gateway_device_registry_updated),
     ]
 
     async def send_command(
