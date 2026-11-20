@@ -320,6 +320,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if message_type == "registry":
                     registry.add(mac)
                 else:
+                    if (device_id, mac) in data[DATA_REMOVED_SENSORS]:
+                        continue
                     sensor: dict[str, Any] = {"mac": mac}
                     rssi = item.get("rssi")
                     if isinstance(rssi, int) and not isinstance(rssi, bool):
@@ -673,6 +675,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # resurrecting the sensor after a restart.
         data[DATA_REMOVED_SENSORS].add((device_id, mac))
         gateway["registry"].discard(mac)
+        gateway["discovered"].pop(mac, None)
         data[DATA_MEASUREMENTS].pop((device_id, mac), None)
         data["last_measurements"].pop((device_id, mac), None)
         async_reconcile_gateway(hass, entry, data, device_id)
