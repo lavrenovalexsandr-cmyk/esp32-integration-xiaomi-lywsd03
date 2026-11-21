@@ -212,11 +212,11 @@ class Esp32XiaomiSensorManager extends HTMLElement {
           <div id="message" class="message" role="status" aria-live="polite"></div>
         </div>
         <dialog id="device-setup">
-          <h2>Назвать и назначить</h2>
-          <p>Настройте новое устройство Xiaomi в Home Assistant.</p>
+          <h2>Настройка датчика</h2>
+          <p>Укажите имя и комнату датчика в Home Assistant.</p>
           <label for="device-name">Название устройства</label>
           <input id="device-name" type="text" maxlength="128" autocomplete="off">
-          <label for="device-area">Область</label>
+          <label for="device-area">Комната</label>
           <select id="device-area">
             <option value="">Не назначать</option>
           </select>
@@ -582,7 +582,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       this._setupDeviceId = null;
       this._deviceNamesUpdatedAt = 0;
       await this._loadDeviceNames();
-      this._showMessage("Название и область устройства сохранены.", false);
+      this._showMessage("Имя и комната датчика сохранены.", false);
     } catch (error) {
       this._showMessage(this._errorText(error), true);
     } finally {
