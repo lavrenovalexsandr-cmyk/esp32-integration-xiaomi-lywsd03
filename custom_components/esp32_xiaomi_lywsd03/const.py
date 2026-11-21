@@ -41,3 +41,9 @@ PANEL_STATIC_URL = "/esp32_xiaomi_lywsd03/xiaomi-panel.js"
 DEVICE_ID_PATTERN = r"^[0-9A-F]{12}$"
 MAC_PATTERN = r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$"
 BIND_KEY_PATTERN = r"^[0-9A-Fa-f]{32}$"
+
+
+ESP32_MANAGER_DOMAIN = "esp32_ota"
+ESP32_MANAGER_API_VERSION = 1
+ESP32_MANAGER_EVENT_ADDED = "esp32_ota_device_added"
+ESP32_MANAGER_EVENT_UPDATED = "esp32_ota_device_updated"
