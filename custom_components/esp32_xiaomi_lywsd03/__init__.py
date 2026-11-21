@@ -195,12 +195,6 @@ async def websocket_get_state(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Xiaomi integration entry."""
-    if not isinstance(entry.runtime_data, dict):
-        entry.runtime_data = {"profiles": {}}
-    else:
-        entry.runtime_data.setdefault("profiles", {})
-    profiles: dict[str, Any] = entry.runtime_data["profiles"]
-
     removed_store = Store(
         hass, 1, f"{DOMAIN}_{entry.entry_id}_removed_sensors"
     )
@@ -226,8 +220,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "last_measurements": {},
         DATA_SENSOR_ENTITIES: {},
         DATA_ADD_ENTITIES: None,
+        # Per-config-entry transient state; intentionally not persisted.
+        "profiles": {},
     }
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
+    profiles: dict[str, Any] = data["profiles"]
     device_registry = dr.async_get(hass)
 
     async def save_removed_sensors() -> None:
@@ -874,10 +871,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
         hass.data[DOMAIN]["_panel_registered"] = False
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
-    runtime_data = getattr(entry, "runtime_data", None)
-    if isinstance(runtime_data, dict):
-        runtime_data.clear()
-    entry.runtime_data = None
+    data.get("profiles", {}).clear()
     for unsubscribe in data.get(DATA_UNSUB, []):
         unsubscribe()
     for pending in data.get(DATA_PENDING, {}).values():
