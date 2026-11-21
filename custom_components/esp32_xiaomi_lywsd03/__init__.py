@@ -52,6 +52,7 @@ from .const import (
     ESP32_MANAGER_API_VERSION,
     ESP32_MANAGER_EVENT_ADDED,
     ESP32_MANAGER_EVENT_UPDATED,
+    ESP32_MANAGER_EVENT_REMOVED,
 )
 from .sensor import async_reconcile_gateway, async_write_sensor_state
 
@@ -292,6 +293,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         snapshot = event.data.get("device")
         if isinstance(snapshot, dict):
             sync_gateway_from_manager(snapshot)
+
+    async def manager_device_removed(event) -> None:
+        """Finalize XSM cleanup after ESP32 Manager removes the central device."""
+        device_id = str(event.data.get("device_id", "")).upper()
+        if DEVICE_ID_RE.fullmatch(device_id):
+            # The Manager removal callback runs before its own registry/state
+            # cleanup. Repeat cleanup on the final lifecycle event so any
+            # concurrent MQTT availability/update event cannot leave a stale
+            # gateway in the panel's runtime projection.
+            await remove_gateway_data(device_id)
 
     async def remove_gateway_data(device_id_value: str) -> None:
         """Remove all Xiaomi-owned state for one ESP32 gateway."""
@@ -618,6 +629,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data[DATA_UNSUB] = [
         hass.bus.async_listen(ESP32_MANAGER_EVENT_ADDED, manager_device_event),
         hass.bus.async_listen(ESP32_MANAGER_EVENT_UPDATED, manager_device_event),
+        hass.bus.async_listen(ESP32_MANAGER_EVENT_REMOVED, manager_device_removed),
         manager_api["register_remove_handler"](DOMAIN, remove_gateway_data),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
