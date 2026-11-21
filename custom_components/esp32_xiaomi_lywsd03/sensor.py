@@ -99,7 +99,9 @@ class XiaomiMeasurementSensor(SensorEntity):
     def available(self) -> bool:
         """Follow the parent ESP32 gateway availability."""
         gateway = self._data[DATA_GATEWAYS].get(self._device_id)
-        return bool(gateway and gateway["available"])
+        return bool(
+            gateway and gateway["available"] and gateway["profile_valid"]
+        )
 
     @property
     def native_value(self) -> StateType:
@@ -142,6 +144,7 @@ def async_reconcile_gateway(
     if (
         gateway is None
         or not gateway["identity_received"]
+        or not gateway["profile_valid"]
         or not gateway["registry_received"]
         or add_entities is None
     ):
