@@ -95,6 +95,8 @@ ESP32 Manager создаёт общую запись физического шл
 
 Интеграция подписывается на `esp32/+/xiaomi/sensor/+/state`. Обработка продуктовых сообщений разрешается только для шлюзов, уже известных ESP32 Manager. Общие identity/profile/availability обрабатывает Manager. Доступность сенсоров зависит от центрального availability и валидности профиля.
 
+При полном удалении шлюза ESP32 Manager вызывает зарегистрированный cleanup handler Xiaomi Sensor Manager. XSM удаляет все дочерние Xiaomi-устройства и сущности, связанные retained measurements, runtime-кэш, pending-команды и persistent tombstones конкретного шлюза. Retained Xiaomi snapshots и measurements этого шлюза очищаются; данные других ESP32 не затрагиваются.
+
 Комнаты не передаются по MQTT и не хранятся в firmware. Пользователь назначает Area штатными средствами Home Assistant.
 
 ## Безопасность
