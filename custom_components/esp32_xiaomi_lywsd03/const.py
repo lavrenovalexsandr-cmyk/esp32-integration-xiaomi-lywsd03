@@ -5,6 +5,7 @@ DEVICE_IDENTIFIER_NAMESPACE = "esp32"
 XIAOMI_DEVICE_IDENTIFIER_NAMESPACE = "esp32_xiaomi_lywsd03"
 
 IDENTITY_TOPIC = "esp32/+/device/info"
+PROFILE_TOPIC = "esp32/+/device/profile"
 AVAILABILITY_TOPIC = "esp32/+/availability"
 XIAOMI_TOPICS = (
     "esp32/+/xiaomi/discovered",
