@@ -207,8 +207,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
           </div>
           <div class="actions">
             <button id="add">Добавить датчик</button>
-            <button id="remove" class="danger">Удалить датчик</button>
-            <button id="configure-sensor" class="configure">Настроить</button>
+            <button id="remove" class="danger"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>Удалить датчик</button>
+            <button id="configure-sensor" class="configure"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z"/></svg>Настроить</button>
             <button id="refresh" class="refresh"><span aria-hidden="true">↻</span>Обновить</button>
           </div>
           <div id="message" class="message" role="status" aria-live="polite"></div>
