@@ -102,7 +102,6 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "available": False,
         "availability_received": False,
         "identity_received": False,
-        "sw_version": None,
         "profile_valid": False,
         "discovered": {},
         "registry": set(),
