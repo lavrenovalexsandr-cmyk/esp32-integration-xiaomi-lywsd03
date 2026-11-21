@@ -898,7 +898,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
-    """Allow removal of obsolete XSM ownership without deleting Manager devices."""
+    """Allow removal of obsolete XSM-owned gateway device entries."""
+    if device_entry.config_entry_id != entry.entry_id:
+        return False
+
     device_id = next(
         (
             identifier.upper()
@@ -908,28 +911,16 @@ async def async_remove_config_entry_device(
         ),
         None,
     )
-    if device_id is None or entry.entry_id not in device_entry.config_entries:
+    if device_id is None:
         return False
 
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     remove_gateway_data = data.get("remove_gateway_data") if data else None
-
-    is_legacy_xsm_device = any(
-        namespace == DOMAIN and identifier.upper() == device_id
-        for namespace, identifier in device_entry.identifiers
-    )
     if remove_gateway_data is not None:
         await remove_gateway_data(device_id)
 
-    if is_legacy_xsm_device:
-        # The cleanup handler already removes this obsolete duplicate.
-        if remove_gateway_data is None:
-            dr.async_get(hass).async_remove_device(device_entry.id)
-    else:
-        # The device is shared with ESP32 Manager. Detach only XSM's ownership.
-        dr.async_get(hass).async_update_device(
-            device_entry.id, remove_config_entry_id=entry.entry_id
-        )
+    # Home Assistant removes the Device Registry entry after this callback
+    # returns True. The cleanup handler removes its children and stale data.
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
