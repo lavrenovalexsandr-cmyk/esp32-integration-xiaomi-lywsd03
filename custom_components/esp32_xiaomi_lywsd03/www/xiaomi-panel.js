@@ -6,6 +6,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._gateways = [];
     this._deviceNames = new Map();
     this._deviceNamesUpdatedAt = 0;
+    this._sensorDevices = new Map();
+    this._areaNames = new Map();
     this._deviceNamesPromise = null;
     this._selectedGateway = "";
     this._selectedMac = "";
@@ -69,14 +71,30 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         const devices = await this._hass.connection.sendMessagePromise({
           type: "config/device_registry/list"
         });
+        const areasResponse = await this._hass.connection.sendMessagePromise({
+          type: "config/area_registry/list"
+        });
+        const areas = Array.isArray(areasResponse) ? areasResponse : areasResponse.areas || [];
         this._deviceNames = new Map();
+        this._sensorDevices = new Map();
+        this._areaNames = new Map(areas.map((area) => [area.area_id, area.name]));
         for (const device of devices) {
-          const identifier = (device.identifiers || []).find(
-            ([namespace]) => namespace === "esp32"
-          );
-          if (identifier) {
-            const name = device.name_by_user || device.name;
-            if (name) this._deviceNames.set(String(identifier[1]).toUpperCase(), name);
+          for (const identifier of device.identifiers || []) {
+            if (identifier[0] === "esp32") {
+              const name = device.name_by_user || device.name;
+              if (name) this._deviceNames.set(String(identifier[1]).toUpperCase(), name);
+            } else if (identifier[0] === "esp32_xiaomi_lywsd03") {
+              const match = /^([0-9A-F]{12})_([0-9A-F]{12})$/.exec(String(identifier[1]).toUpperCase());
+              if (match) {
+                const mac = match[2].match(/.{2}/g).join(":");
+                this._sensorDevices.set(match[1] + "_" + mac, {
+                  id: device.id,
+                  name: device.name_by_user || "Xiaomi LYWSD03MMC",
+                  areaId: device.area_id || "",
+                  area: this._areaNames.get(device.area_id) || ""
+                });
+              }
+            }
           }
         }
         for (const gateway of this._gateways) {
@@ -188,6 +206,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
           <div class="actions">
             <button id="add">Добавить датчик</button>
             <button id="remove" class="danger">Удалить датчик</button>
+            <button id="configure-sensor" class="secondary">Настроить</button>
             <button id="refresh" class="secondary">Обновить</button>
           </div>
           <div id="message" class="message" role="status" aria-live="polite"></div>
@@ -214,6 +233,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     });
     this.shadowRoot.getElementById("add").addEventListener("click", () => this._addSensor());
     this.shadowRoot.getElementById("remove").addEventListener("click", () => this._removeSensor());
+    this.shadowRoot.getElementById("configure-sensor").addEventListener("click", () => this._configureSelectedSensor());
     this.shadowRoot.getElementById("refresh").addEventListener("click", () => this._loadState());
     this.shadowRoot.getElementById("device-setup-cancel").addEventListener("click", () => {
       this.shadowRoot.getElementById("device-setup").close();
@@ -412,16 +432,22 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     if (!options.some((item) => item.mac === this._selectedMac)) {
       this._selectedMac = options[0]?.mac || "";
     }
-    const sensorItems = options.map((item) => ({
+    const sensorItems = options.map((item) => {
+      const registered = this._sensorDevices.get(gateway?.device_id + "_" + item.mac);
+      const label = registered
+        ? registered.name + (registered.area ? " · " + registered.area : "")
+        : item.mac;
+      return {
       value: item.mac,
-      label: item.mac,
+      label,
       availability: item.availability,
       availabilityText: item.availability === "online" ? "Online"
         : item.availability === "offline" ? "Offline" : "Unknown",
       registry: item.saved ? "saved" : "new",
       registryText: item.saved ? "Save" : "New",
       detail: Number.isInteger(item.rssi) ? `RSSI ${item.rssi} dBm` : ""
-    }));
+      };
+    });
     this._renderDropdown("sensor-picker", sensorItems, this._selectedMac, (value) => {
       this._selectedMac = value;
       this._renderSelection();
@@ -437,12 +463,14 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this.shadowRoot.getElementById("key-row").hidden = saved || !selected;
     this.shadowRoot.getElementById("add").hidden = saved || !selected;
     this.shadowRoot.getElementById("remove").hidden = !saved;
+    this.shadowRoot.getElementById("configure-sensor").hidden = !saved;
     const gatewayTrigger = this.shadowRoot.querySelector("#gateway-picker .picker-trigger");
     const sensorTrigger = this.shadowRoot.querySelector("#sensor-picker .picker-trigger");
     if (gatewayTrigger) gatewayTrigger.disabled = this._gateways.length === 0;
     if (sensorTrigger) sensorTrigger.disabled = !selected;
     this.shadowRoot.getElementById("add").disabled = this._busy || !selected || !gateway?.available || !gateway?.registry_received;
     this.shadowRoot.getElementById("remove").disabled = this._busy || !saved;
+    this.shadowRoot.getElementById("configure-sensor").disabled = this._busy || !saved;
   }
 
   async _addSensor() {
@@ -471,6 +499,24 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       } else {
         this._showMessage("Датчик добавлен, но Home Assistant пока не зарегистрировал его устройство. Обновите список чуть позже.", true);
       }
+    } catch (error) {
+      this._showMessage(this._errorText(error), true);
+    } finally {
+      this._setBusy(false);
+    }
+  }
+
+  async _configureSelectedSensor() {
+    const gateway = this._selectedGatewayData();
+    if (!gateway || !this._selectedMac) return;
+    this._setBusy(true);
+    try {
+      const device = await this._waitForSensorDevice(gateway.device_id, this._selectedMac);
+      if (!device) {
+        this._showMessage("Устройство датчика не найдено в реестре Home Assistant.", true);
+        return;
+      }
+      await this._openDeviceSetup(device);
     } catch (error) {
       this._showMessage(this._errorText(error), true);
     } finally {
@@ -534,6 +580,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
       });
       this.shadowRoot.getElementById("device-setup").close();
       this._setupDeviceId = null;
+      this._deviceNamesUpdatedAt = 0;
+      await this._loadDeviceNames();
       this._showMessage("Название и область устройства сохранены.", false);
     } catch (error) {
       this._showMessage(this._errorText(error), true);
