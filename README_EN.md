@@ -6,14 +6,12 @@ A dedicated Home Assistant integration for ESP32 gateways with Xiaomi LYWSD03MMC
 
 ## HACS installation
 
-1. Open **HACS → Integrations**.
-2. Open the top-right menu and select **Custom repositories**.
-3. Add `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` with category **Integration**.
-4. Find and install **ESP32 Xiaomi Sensor Manager**.
-5. Restart Home Assistant.
-6. Go to **Settings → Devices & services → Add integration** and add **ESP32 Xiaomi Sensor Manager**.
+1. Add `lavrenovalexsandr-cmyk/esp32-integration-manager` in **HACS → Integrations → Custom repositories**, install **ESP32 Manager**, and add it through **Settings → Devices & services → Add integration**.
+2. Add `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` to HACS and install **ESP32 Xiaomi Sensor Manager**.
+3. Restart Home Assistant if HACS requests it.
+4. Add **ESP32 Xiaomi Sensor Manager** through **Settings → Devices & services → Add integration**.
 
-Configure the standard Home Assistant **MQTT** integration separately and make sure the broker is connected to the ESP32 gateways. This integration reuses the configured MQTT connection; it does not need broker credentials in its own config flow.
+Configure the standard Home Assistant **MQTT** integration separately and make sure the broker is connected to the ESP32 gateways. The Xiaomi integration reuses the configured MQTT connection; it does not need broker credentials in its own config flow.
 
 A GitHub Release is not required for installation as a Custom repository: if there are no releases, HACS uses the short hash of the latest commit as the version. For regular versioned updates, publishing a GitHub Release with a tag aligned with `manifest.json` is recommended. You can also test manually by copying `custom_components/esp32_xiaomi_lywsd03` into `config/custom_components/`.
 
@@ -25,30 +23,27 @@ The **Xiaomi Sensor Manager** panel is part of this repository and appears in th
 
 ## Purpose and responsibility boundaries
 
-This integration handles Xiaomi-specific operations and coordination across multiple ESP32 gateways. Generic ESP32 management (OTA, Restart and Factory Reset) remains in the universal `esp32_ota` integration; base gateway identity belongs to Platform Core and the shared MQTT contract.
+This integration handles Xiaomi-specific operations and coordination across multiple ESP32 gateways. Generic ESP32 management (OTA, Restart and Factory Reset), gateway discovery, identity, profile, availability and the shared device registry belong to ESP32 Manager.
 
 Responsibilities:
 
 - **Firmware:** BLE discovery, bind-key storage in NVS, registry, commands and command results, retained snapshots and retained MQTT measurements.
-- **Platform Core:** shared ESP32 identity and availability, MQTT, and Discovery only for generic gateway entities. Xiaomi entities are not created through Platform Core Discovery.
-- **Universal `esp32_ota` integration:** OTA and generic device-control commands; it also uses the shared gateway device entry but is not required by the Xiaomi integration.
-- **Shared MQTT contract / Platform Core:** stable gateway identity and its base information.
-- **This Xiaomi integration:** MQTT snapshots and measurements, per-gateway state, the one-MAC/one-gateway rule, add/remove services, secure bind-key forwarding, HA device/sensor lifecycle and the manager panel.
-- **Xiaomi Sensor Manager panel:** gateway/sensor selection, `New`/`Save` status, add and remove operations through integration services. The panel does not publish MQTT directly or store bind-keys.
+- **ESP32 Manager (`esp32_ota`):** the sole source of common gateway information; discovery, identity, profile, availability, shared Device Registry entry, public API and lifecycle events; OTA and generic system commands.
+- **Platform Core:** stable hardware identity, common MQTT contracts and firmware platform mechanisms.
+- **This Xiaomi integration:** Xiaomi snapshots and measurements only, per-gateway domain state, the one-MAC/one-gateway rule, add/remove services, secure bind-key forwarding, creation/removal of child Xiaomi devices and sensors, and the manager panel.
+- **Xiaomi Sensor Manager panel:** gateway and sensor selection, `New`/`Save` status, and add/remove operations through integration services. The panel does not publish MQTT directly or store bind-keys.
 
 ## Shared ESP32 gateway identity
 
-The Xiaomi integration is independent of `esp32_ota`: it must not import its code or require it to be installed.
-
-To merge information from different ESP32 integrations into one Home Assistant Device Registry entry, use the shared gateway identifier:
+Xiaomi Sensor Manager declares `esp32_ota` as a required dependency in `manifest.json`. ESP32 Manager creates the shared physical-device entry with identifier:
 
 ```python
 identifiers={("esp32", device_id)}
 ```
 
-Here, `esp32` is the platform-wide namespace and `device_id` is the stable ID from MQTT identity. The gateway name and model must come from the same MQTT identity fields (`name` and `model`) so integrations expose consistent device information.
+The Xiaomi integration does not subscribe to common MQTT identity, profile or availability topics, does not create the gateway entry in Device Registry, and does not maintain its own copy of common metadata. At startup it obtains device snapshots through the public API `hass.data["esp32_ota"]["api"]`, then updates its runtime projection from the `esp32_ota_device_added` and `esp32_ota_device_updated` events.
 
-**Implementation:** the integration obtains gateway MQTT identity independently and uses `("esp32", device_id)` when registering/enriching the gateway device. It does not use `("esp32_ota", device_id)` or rely on `esp32_ota` being installed. Xiaomi services accept the stable `device_id`.
+The integration uses `get_devices()` and `get_device(device_id)` from the API. For cascading removal, Xiaomi Sensor Manager registers its own async cleanup handler through `register_remove_handler`. It continues to process only Xiaomi product topics: discovered, registry, command/result and sensor measurements.
 
 ## Features
 
@@ -71,7 +66,7 @@ Services:
 
 Fields for `add_sensor`:
 
-- `device_id` — stable ID of the selected ESP32 gateway from MQTT identity;
+- `device_id` — stable ID of the selected ESP32 gateway from the MQTT identity managed by ESP32 Manager;
 - `mac` — sensor MAC in `AA:BB:CC:DD:EE:FF` format;
 - `bind_key` — exactly 32 hexadecimal characters (16 bytes).
 
@@ -80,7 +75,7 @@ Fields for `remove_sensor`:
 - `device_id` — stable ID of the selected ESP32 gateway;
 - `mac` — sensor MAC.
 
-The service uses the stable `device_id` from MQTT identity. It matches the ID used by `esp32_ota` services, but the Xiaomi integration does not depend on that integration being installed. The gateway ID is not the sensor MAC.
+The service uses the stable `device_id` from ESP32 Manager. It matches the ID used by `esp32_ota` services; the gateway ID is not the sensor MAC.
 
 ## Sensor state
 
@@ -89,15 +84,17 @@ The UI combines two independent retained snapshots for the selected gateway:
 - **New** — MAC is present in `discovered` and absent from `registry`;
 - **Save** — MAC is present in `registry`.
 
-After a successful removal, the sensor is removed from `registry`. If the gateway continues receiving its BLE advertisements, it appears in `discovered` again as **New**. Removed sensors must not be artificially hidden from the discovered list.
+After a removal request, the sensor is immediately removed from XSM's local state and Home Assistant, and its MAC is stored in a persistent tombstone. This prevents an old retained `registry` snapshot from restoring the sensor before the gateway confirms cleanup. If the gateway is available, XSM also sends the remove command in the background; gateway confirmation does not block local removal. If the gateway is offline or the command is not confirmed, local removal remains completed and the tombstone continues to protect the state from stale snapshots. The tombstone is cleared after the gateway publishes a `registry` snapshot without that MAC. If the sensor is still detected over BLE, it appears again as **New**.
 
 Snapshots are always kept separately by gateway device ID. A MAC may be discovered by multiple gateways, but it may be saved on only one gateway at a time.
 
 ## Home Assistant devices and Areas
 
-The Xiaomi integration obtains gateway MQTT identity independently and uses the shared Device Registry identifier `("esp32", device_id)`. If `esp32_ota` is installed, both integrations enrich the same gateway entry rather than creating separate devices. The Xiaomi integration creates a child HA device for each MAC in the retained `registry`, with three entities: temperature, humidity and battery. The child `device_info` sets `via_device` to the shared ESP32 identifier `("esp32", device_id)`. When a MAC disappears from the registry, the integration removes its sensor entities and device. Unknown measurements remain `unknown` until the sensor reports them.
+ESP32 Manager creates the shared gateway device entry. Xiaomi Sensor Manager creates a child HA device for each MAC in the retained `registry`, with three entities: temperature, humidity and battery. The child `device_info` sets `via_device` to the shared ESP32 identifier `("esp32", device_id)`. When a MAC is removed from the registry, the integration removes its sensor entities and child device. Unknown measurements remain `unknown` until the sensor reports them.
 
-The integration subscribes to `esp32/+/xiaomi/sensor/+/state`. Retained measurements may arrive before the registry snapshot or gateway identity; the implementation must cache them and apply them once the required information is available. Sensor availability follows the gateway availability.
+The integration subscribes to `esp32/+/xiaomi/sensor/+/state`. Product messages are processed only for gateways already known to ESP32 Manager. Manager handles common identity/profile/availability. Sensor availability follows the central gateway availability and profile validity.
+
+When a gateway is fully removed, ESP32 Manager calls the cleanup handler registered by Xiaomi Sensor Manager. XSM removes all child Xiaomi devices and entities, retained measurements associated with that gateway, runtime cache, pending commands and persistent tombstones for that gateway. Retained Xiaomi snapshots and measurements for that gateway are cleared; data for other ESP32 devices is not affected.
 
 Areas are not sent over MQTT or stored in firmware. Users assign Areas through native Home Assistant functionality.
 
@@ -124,7 +121,7 @@ The contract defines topics, payloads, retained snapshots, add/remove commands, 
 
 The panel is included in this integration repository, registered as a Home Assistant custom panel and restricted to administrators. It must:
 
-1. allow selection of an ESP32 gateway known to the Xiaomi integration through MQTT identity, regardless of whether `esp32_ota` is installed;
+1. allow selection of an ESP32 gateway known to the central ESP32 Manager registry;
 2. show discovered and saved sensors for the selected gateway;
 3. mark saved sensors as **Save** and new sensors as **New**;
 4. provide a bind-key field only for adding;
