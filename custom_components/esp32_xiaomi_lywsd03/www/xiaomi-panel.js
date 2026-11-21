@@ -12,6 +12,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
     this._unsubscribe = null;
     this._statusTimer = null;
     this._loading = false;
+    this._reloadRequested = false;
     this._busy = false;
     this._setupDeviceId = null;
     this._onDocumentPointerDown = (event) => {
@@ -94,21 +95,35 @@ class Esp32XiaomiSensorManager extends HTMLElement {
   }
 
   async _loadState() {
-    if (!this._hass || this._loading) return;
+    if (!this._hass) return;
+    if (this._loading) {
+      // Do not lose state-change events that arrive while a request is in
+      // flight. The current response may predate a gateway removal.
+      this._reloadRequested = true;
+      return;
+    }
     this._loading = true;
     try {
-      const result = await this._hass.callWS({
-        type: "esp32_xiaomi_lywsd03/get_state"
-      });
-      this._gateways = Array.isArray(result.gateways) ? result.gateways : [];
-      if (!this._gateways.some((item) => item.device_id === this._selectedGateway)) {
-        this._selectedGateway = this._gateways[0]?.device_id || "";
-      }
-      this._renderData();
+      do {
+        this._reloadRequested = false;
+        const result = await this._hass.callWS({
+          type: "esp32_xiaomi_lywsd03/get_state"
+        });
+        this._gateways = Array.isArray(result.gateways) ? result.gateways : [];
+        if (!this._gateways.some((item) => item.device_id === this._selectedGateway)) {
+          this._selectedGateway = this._gateways[0]?.device_id || "";
+        }
+        this._renderData();
+      } while (this._reloadRequested && this._hass);
     } catch (error) {
       this._showMessage(this._errorText(error), true);
     } finally {
       this._loading = false;
+      // A state event can be queued as the request loop is finishing.
+      if (this._reloadRequested && this._hass) {
+        this._reloadRequested = false;
+        this._loadState();
+      }
     }
   }
 
