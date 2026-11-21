@@ -32,6 +32,7 @@ from .const import (
     DATA_REMOVED_SENSORS,
     DATA_SENSOR_ENTITIES,
     DATA_UNSUB,
+    DEVICE_IDENTIFIER_NAMESPACE,
     DEVICE_ID_PATTERN,
     DOMAIN,
     EVENT_COMMAND_RESULT,
@@ -897,28 +898,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
-    """Allow removal of obsolete XSM-owned gateway device entries."""
+    """Allow removal of obsolete XSM ownership without deleting Manager devices."""
     device_id = next(
         (
             identifier.upper()
             for namespace, identifier in device_entry.identifiers
-            if namespace == DOMAIN and DEVICE_ID_RE.fullmatch(identifier.upper())
+            if namespace in (DOMAIN, DEVICE_IDENTIFIER_NAMESPACE)
+            and DEVICE_ID_RE.fullmatch(identifier.upper())
         ),
         None,
     )
-    if device_id is None:
-        # The shared ESP32 device belongs to ESP32 Manager, not XSM.
+    if device_id is None or entry.entry_id not in device_entry.config_entries:
         return False
 
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     remove_gateway_data = data.get("remove_gateway_data") if data else None
     if remove_gateway_data is not None:
         await remove_gateway_data(device_id)
-    else:
-        # Runtime state may not be loaded; remove the stale XSM-owned record.
-        dr.async_get(hass).async_remove_device(device_entry.id)
-    return True
 
+    if any(
+        namespace == DOMAIN and identifier.upper() == device_id
+        for namespace, identifier in device_entry.identifiers
+    ):
+        # This is an obsolete duplicate owned by XSM; the shared Manager
+        # device, if any, has a different identifier namespace.
+        dr.async_get(hass).async_remove_device(device_entry.id)
+    else:
+        # The device is shared with ESP32 Manager. Detach only XSM's ownership.
+        dr.async_get(hass).async_update_device(
+            device_entry.id, remove_config_entry_id=entry.entry_id
+        )
+    return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the integration entry."""
