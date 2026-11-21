@@ -177,7 +177,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .status-note { color:var(--secondary-text-color); font-size:13px; }
         .actions { display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }
         button { border:0; border-radius:8px; padding:10px 18px; min-height:40px; font:inherit; cursor:pointer; background:var(--primary-color); color:var(--text-primary-color, white); }
-        button.secondary { background:var(--secondary-background-color); color:var(--primary-text-color); }
+        button.secondary { background:var(--error-color); color:var(--text-primary-color, white); }
         button.configure, button.primary { background:#1976d2; color:#fff; }
         button.refresh { display:inline-flex; align-items:center; gap:8px; background:#2e7d32; color:#fff; }
         button.green { background:#2e7d32; color:#fff; }
