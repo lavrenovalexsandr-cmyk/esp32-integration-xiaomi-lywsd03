@@ -125,7 +125,7 @@ The Home Assistant integration subscribes to this topic and creates separate tem
 
 Sensor entity availability inherits the availability of its gateway. Version 1 does not introduce a per-sensor availability topic. Gateway availability therefore does not guarantee that an individual sensor has transmitted recently.
 
-When a sensor is removed, the gateway deletes its retained state topic by publishing an empty retained payload. The Home Assistant integration removes the corresponding HA entities and child device after receiving the updated registry.
+When gateway-side removal is confirmed, the gateway deletes the retained state topic by publishing an empty retained payload. In Home Assistant, XSM performs local removal first: it persists a tombstone, immediately removes the entities and child device, and ignores stale retained snapshots for that MAC. If the gateway is available, the remove command is sent in the background; gateway confirmation is not required for local removal. The tombstone is cleared after XSM receives a gateway registry snapshot that no longer contains the MAC.
 
 ## 5. Add command
 
@@ -243,9 +243,9 @@ A retained registry from an offline gateway still counts: losing connectivity do
 - The Home Assistant integration creates a separate child device and three entities (temperature, humidity, battery) for every MAC in the retained `registry`.
 - Child device and entity identifiers are derived from the gateway `DEVICE_ID` and sensor MAC so identical MACs on different gateways cannot collide.
 - The child `device_info` sets `via_device=("esp32", DEVICE_ID)`, linking it to the shared gateway device.
-- The integration subscribes to `esp32/+/xiaomi/sensor/+/state`, validates payload versions and values, and caches the latest measurements until the corresponding registry/identity information is available.
+- The integration subscribes to `esp32/+/xiaomi/sensor/+/state` and accepts measurements only after the gateway identity has been received from ESP32 Manager. Measurements may be cached before the registry arrives if identity is already known; messages received before identity are discarded and are not cached.
 - Entity availability follows `esp32/<DEVICE_ID>/availability`. This indicates gateway availability, not proof of recent BLE communication with the sensor.
-- When a MAC disappears from the registry, the integration removes its three entities and child device. If the MAC appears again, they are created again.
+- On a local removal request, XSM immediately removes the three entities and child device and keeps a tombstone until gateway cleanup is confirmed. If a MAC disappears from the registry, the integration also removes its child device; if it appears again, the device and entities are created again.
 - Rooms/Areas are not sent over MQTT. Users assign Areas through Home Assistant.
 
 ## 10. Implementation limits
@@ -256,7 +256,7 @@ The Xiaomi driver supports a registry of up to 16 sensors per gateway. Firmware 
 
 After MQTT startup and every reconnect, the gateway publishes current retained snapshots for `discovered` and `registry`. Latest measurements remain available through retained state topics.
 
-The integration treats retained snapshots as the gateway's current state. Commands must not accumulate in the broker: retain is forbidden for commands. After an MQTT disconnect, the integration must not mark an unconfirmed operation as successful; it waits for the result or reports a failure/timeout and reconciles state against the next registry snapshot.
+The integration treats retained snapshots as the gateway's current state. Commands must not accumulate in the broker: retain is forbidden for commands. After an MQTT disconnect, the integration must not mark an unconfirmed add command as successful; it waits for the result or reports a failure/timeout and reconciles against the next registry snapshot. XSM removal is applied locally immediately, while gateway cleanup is a background best-effort operation; the tombstone remains until a registry snapshot confirms that the MAC is absent.
 
 Gateway availability is published by the universal Platform Core at `esp32/<DEVICE_ID>/availability`, retained and backed by Last Will. No Xiaomi-specific availability topic is added.
 
