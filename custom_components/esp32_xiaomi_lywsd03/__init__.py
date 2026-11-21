@@ -913,16 +913,18 @@ async def async_remove_config_entry_device(
 
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     remove_gateway_data = data.get("remove_gateway_data") if data else None
+
+    is_legacy_xsm_device = any(
+        namespace == DOMAIN and identifier.upper() == device_id
+        for namespace, identifier in device_entry.identifiers
+    )
     if remove_gateway_data is not None:
         await remove_gateway_data(device_id)
 
-    if any(
-        namespace == DOMAIN and identifier.upper() == device_id
-        for namespace, identifier in device_entry.identifiers
-    ):
-        # This is an obsolete duplicate owned by XSM; the shared Manager
-        # device, if any, has a different identifier namespace.
-        dr.async_get(hass).async_remove_device(device_entry.id)
+    if is_legacy_xsm_device:
+        # The cleanup handler already removes this obsolete duplicate.
+        if remove_gateway_data is None:
+            dr.async_get(hass).async_remove_device(device_entry.id)
     else:
         # The device is shared with ESP32 Manager. Detach only XSM's ownership.
         dr.async_get(hass).async_update_device(
