@@ -254,6 +254,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         gateway = ensure_gateway(device_id)
         was_valid = gateway["profile_valid"]
+        was_available = gateway["available"]
         gateway["identity_received"] = True
         gateway["name"] = str(snapshot.get("name") or f"ESP32-{device_id[-6:]}")[:64]
         gateway["name_by_user"] = (
@@ -278,7 +279,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     data["last_measurements"].pop(sensor_key, None)
         if gateway["profile_valid"]:
             async_reconcile_gateway(hass, entry, data, device_id)
-        if was_valid != gateway["profile_valid"] or not gateway["available"]:
+        if was_valid != gateway["profile_valid"] or was_available != gateway["available"]:
             for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
                 if sensor_gateway_id == device_id:
                     async_write_sensor_state(data, device_id, mac)
