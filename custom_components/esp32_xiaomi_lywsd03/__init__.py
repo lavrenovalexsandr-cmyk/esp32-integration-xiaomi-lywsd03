@@ -16,9 +16,11 @@ from homeassistant.components import frontend, mqtt, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
 from homeassistant.helpers.storage import Store
 
 from .const import (
@@ -291,8 +293,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update_profile_state(device_id)
 
     @callback
-    def mqtt_disconnected(event: Any) -> None:
-        """Forget cached profiles until retained state is replayed after reconnect."""
+    def mqtt_connection_changed(connected: bool) -> None:
+        """Forget cached profiles on disconnect until retained state is replayed."""
+        if connected:
+            return
         profiles.clear()
         for device_id, gateway in data[DATA_GATEWAYS].items():
             was_valid = gateway["profile_valid"]
@@ -587,7 +591,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, MEASUREMENTS_TOPIC, measurement_message, qos=1),
-        hass.bus.async_listen("mqtt_disconnected", mqtt_disconnected),
+        async_dispatcher_connect(
+            hass, MQTT_CONNECTION_STATE, mqtt_connection_changed
+        ),
     ]
 
     async def send_command(
