@@ -178,8 +178,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .actions { display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }
         button { border:0; border-radius:8px; padding:10px 18px; min-height:40px; font:inherit; cursor:pointer; background:var(--primary-color); color:var(--text-primary-color, white); }
         button.secondary { background:var(--secondary-background-color); color:var(--primary-text-color); }
-        button.configure { background:#1976d2; color:#fff; }
-        button.refresh { display:inline-flex; align-items:center; gap:8px; background:#2e7d32; color:#fff; }
+        button.configure, button.primary { background:#1976d2; color:#fff; }
+        button.refresh { display:inline-flex; align-items:center; gap:8px; background:#2e7d32; color:#fff; }\n        button.green { background:#2e7d32; color:#fff; }
         button.danger { background:var(--error-color); color:var(--text-primary-color, white); }
         button:disabled { opacity:.45; cursor:not-allowed; }
         .message { min-height:22px; margin-top:14px; color:var(--success-color); overflow-wrap:anywhere; }
@@ -206,7 +206,7 @@ class Esp32XiaomiSensorManager extends HTMLElement {
             <input id="bind-key" type="password" autocomplete="off" spellcheck="false" maxlength="32" placeholder="0123456789ABCDEF0123456789ABCDEF">
           </div>
           <div class="actions">
-            <button id="add">Добавить датчик</button>
+            <button id="add" class="green"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Добавить датчик</button>
             <button id="remove" class="danger"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>Удалить датчик</button>
             <button id="configure-sensor" class="configure"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z"/></svg>Настроить</button>
             <button id="refresh" class="refresh"><span aria-hidden="true">↻</span>Обновить</button>
@@ -223,8 +223,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
             <option value="">Не назначать</option>
           </select>
           <div class="dialog-actions">
-            <button id="device-setup-cancel" class="secondary" type="button">Позже</button>
-            <button id="device-setup-save" type="button">Сохранить</button>
+            <button id="device-setup-cancel" class="secondary" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Позже</button>
+            <button id="device-setup-save" class="primary" type="button"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Сохранить</button>
           </div>
         </dialog>
       </div>
