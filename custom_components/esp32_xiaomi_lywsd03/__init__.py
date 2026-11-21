@@ -337,12 +337,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     topic, exc_info=True,
                 )
 
-        for mac in macs:
-            compact_mac = mac.replace(":", "")
-            child = device_registry.async_get_device(
-                identifiers={(DOMAIN, f"{device_id}_{compact_mac}")}
-            )
-            if child is not None:
+        # Remove every child device by its stable identifier, including
+        # orphaned Device Registry entries with no remaining entity rows.
+        for child in tuple(device_registry.devices.values()):
+            if any(
+                namespace == DOMAIN and identifier.startswith(f"{device_id}_")
+                for namespace, identifier in child.identifiers
+            ):
                 device_registry.async_remove_device(child.id)
 
         for collection in (DATA_MEASUREMENTS, "last_measurements", DATA_SENSOR_ENTITIES):
