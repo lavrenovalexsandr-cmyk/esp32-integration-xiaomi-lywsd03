@@ -178,6 +178,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
         .actions { display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }
         button { border:0; border-radius:8px; padding:10px 18px; min-height:40px; font:inherit; cursor:pointer; background:var(--primary-color); color:var(--text-primary-color, white); }
         button.secondary { background:var(--secondary-background-color); color:var(--primary-text-color); }
+        button.configure { background:#1976d2; color:#fff; }
+        button.refresh { display:inline-flex; align-items:center; gap:8px; background:#2e7d32; color:#fff; }
         button.danger { background:var(--error-color); color:var(--text-primary-color, white); }
         button:disabled { opacity:.45; cursor:not-allowed; }
         .message { min-height:22px; margin-top:14px; color:var(--success-color); overflow-wrap:anywhere; }
@@ -206,8 +208,8 @@ class Esp32XiaomiSensorManager extends HTMLElement {
           <div class="actions">
             <button id="add">Добавить датчик</button>
             <button id="remove" class="danger">Удалить датчик</button>
-            <button id="configure-sensor" class="secondary">Настроить</button>
-            <button id="refresh" class="secondary">Обновить</button>
+            <button id="configure-sensor" class="configure">Настроить</button>
+            <button id="refresh" class="refresh"><span aria-hidden="true">↻</span>Обновить</button>
           </div>
           <div id="message" class="message" role="status" aria-live="polite"></div>
         </div>
