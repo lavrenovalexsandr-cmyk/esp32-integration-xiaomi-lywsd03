@@ -6,6 +6,7 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "esp32_ota",
     "http",
     "mqtt",
     "panel_custom"
@@ -14,5 +15,5 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager/issues",
-  "version": "1.0.5"
+  "version": "3.0.0"
 }

@@ -17,14 +17,11 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.components.mqtt.const import MQTT_CONNECTION_STATE
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import (
-    AVAILABILITY_TOPIC,
     BIND_KEY_PATTERN,
     COMMAND_TIMEOUT,
     DATA_ADD_ENTITIES,
@@ -35,13 +32,11 @@ from .const import (
     DATA_REMOVED_SENSORS,
     DATA_SENSOR_ENTITIES,
     DATA_UNSUB,
-    DEVICE_ID_PATTERN,
     DEVICE_IDENTIFIER_NAMESPACE,
+    DEVICE_ID_PATTERN,
     DOMAIN,
     EVENT_COMMAND_RESULT,
     EVENT_STATE_UPDATED,
-    IDENTITY_TOPIC,
-    PROFILE_TOPIC,
     MEASUREMENTS_TOPIC,
     MAC_PATTERN,
     MAX_SENSORS_PER_GATEWAY,
@@ -53,6 +48,11 @@ from .const import (
     SERVICE_ADD_SENSOR,
     SERVICE_REMOVE_SENSOR,
     XIAOMI_TOPICS,
+    ESP32_MANAGER_DOMAIN,
+    ESP32_MANAGER_API_VERSION,
+    ESP32_MANAGER_EVENT_ADDED,
+    ESP32_MANAGER_EVENT_UPDATED,
+    ESP32_MANAGER_EVENT_REMOVED,
 )
 from .sensor import async_reconcile_gateway, async_write_sensor_state
 
@@ -99,10 +99,11 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "device_id": device_id,
         "name": f"ESP32-{device_id[-6:]}",
         "model": "ESP32",
+        "name_by_user": None,
+        "sw_version": None,
         "available": False,
         "availability_received": False,
         "identity_received": False,
-        "sw_version": None,
         "profile_valid": False,
         "discovered": {},
         "registry": set(),
@@ -158,14 +159,16 @@ async def websocket_get_state(
         for gateway in data[DATA_GATEWAYS].values():
             if not gateway["identity_received"]:
                 continue
-            # Prefer the name explicitly assigned by the user in Home Assistant.
-            # The shared identifier lets us read the same gateway entry used by esp32_ota.
-            gateway_device = dr.async_get(hass).async_get_device(
-                identifiers={(DEVICE_IDENTIFIER_NAMESPACE, gateway["device_id"])}
+            # Resolve the current user-assigned name from the central API so
+            # Home Assistant renames are reflected without waiting for MQTT.
+            manager_api = data.get("manager_api")
+            manager_device = (
+                manager_api["get_device"](gateway["device_id"])
+                if manager_api is not None else None
             )
             display_name = (
-                gateway_device.name_by_user
-                if gateway_device is not None and gateway_device.name_by_user
+                manager_device.get("name_by_user")
+                if manager_device and manager_device.get("name_by_user")
                 else gateway["name"]
             )
             gateways.append(
@@ -195,6 +198,12 @@ async def websocket_get_state(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Xiaomi integration entry."""
+    manager_api = hass.data.get(ESP32_MANAGER_DOMAIN, {}).get("api")
+    if not isinstance(manager_api, dict) or manager_api.get("version") != ESP32_MANAGER_API_VERSION:
+        raise ConfigEntryNotReady(
+            "ESP32 Manager is not configured or its public API version is unsupported."
+        )
+
     removed_store = Store(
         hass, 1, f"{DOMAIN}_{entry.entry_id}_removed_sensors"
     )
@@ -212,6 +221,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data: dict[str, Any] = {
         DATA_GATEWAYS: {},
         DATA_UNSUB: [],
+        "manager_api": manager_api,
         DATA_PENDING: {},
         DATA_PENDING_ADDS: {},
         DATA_REMOVED_SENSORS: removed_sensors,
@@ -220,12 +230,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "last_measurements": {},
         DATA_SENSOR_ENTITIES: {},
         DATA_ADD_ENTITIES: None,
-        # Per-config-entry transient state; intentionally not persisted.
-        "profiles": {},
     }
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = data
-    profiles: dict[str, Any] = data["profiles"]
-    device_registry = dr.async_get(hass)
 
     async def save_removed_sensors() -> None:
         """Persist local removals so retained MQTT state cannot restore them."""
@@ -242,145 +248,175 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Return the runtime state for one gateway."""
         return _gateway_state(data, device_id)
 
-    def update_profile_state(device_id: str) -> None:
-        """Re-evaluate the cached profile against the current device info."""
-        gateway = data[DATA_GATEWAYS].get(device_id)
-        if gateway is None:
+    @callback
+    def sync_gateway_from_manager(snapshot: dict[str, Any]) -> None:
+        """Project central ESP32 Manager metadata into the Xiaomi runtime view."""
+        device_id = str(snapshot.get("device_id", "")).upper()
+        if not DEVICE_ID_RE.fullmatch(device_id):
             return
-        profile = profiles.get(device_id)
+        gateway = ensure_gateway(device_id)
         was_valid = gateway["profile_valid"]
-        is_valid = (
-            gateway["identity_received"]
-            and _profile_matches_gateway(gateway, profile)
+        was_available = gateway["available"]
+        gateway["identity_received"] = True
+        gateway["name"] = str(snapshot.get("name") or f"ESP32-{device_id[-6:]}")[:64]
+        gateway["name_by_user"] = (
+            str(snapshot["name_by_user"])[:64]
+            if isinstance(snapshot.get("name_by_user"), str) and snapshot["name_by_user"].strip()
+            else None
         )
-        gateway["profile_valid"] = is_valid
-        if is_valid:
+        gateway["model"] = str(snapshot.get("model") or "ESP32")[:64]
+        gateway["sw_version"] = (
+            str(snapshot["sw_version"])[:64]
+            if isinstance(snapshot.get("sw_version"), str) and snapshot["sw_version"].strip()
+            else None
+        )
+        gateway["available"] = bool(snapshot.get("available", False))
+        gateway["availability_received"] = bool(snapshot.get("availability_received", False))
+        gateway["profile_valid"] = _profile_matches_gateway(gateway, snapshot.get("profile"))
+        if not gateway["available"]:
+            gateway["discovered"] = {}
+            gateway["discovered_received"] = False
+            for sensor_key in tuple(data["last_measurements"]):
+                if sensor_key[0] == device_id:
+                    data["last_measurements"].pop(sensor_key, None)
+        if gateway["profile_valid"]:
             async_reconcile_gateway(hass, entry, data, device_id)
-        if was_valid != is_valid:
+        if was_valid != gateway["profile_valid"] or was_available != gateway["available"]:
             for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
                 if sensor_gateway_id == device_id:
                     async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
 
-    async def profile_message(msg: mqtt.ReceiveMessage) -> None:
-        """Handle the retained product profile for an ESP32 gateway."""
-        match = re.fullmatch(
-            r"esp32/([0-9A-Fa-f]{12})/device/profile", msg.topic
-        )
-        if not match:
-            return
-        device_id = match.group(1).upper()
-        payload = msg.payload
-        if not payload:
-            profiles.pop(device_id, None)
-            update_profile_state(device_id)
-            return
-        try:
-            profile = json.loads(payload)
-        except (ValueError, TypeError):
-            _LOGGER.warning("Ignoring invalid product profile from ESP32 %s", device_id)
-            profiles.pop(device_id, None)
-            update_profile_state(device_id)
-            return
-        if not isinstance(profile, dict):
-            _LOGGER.warning("Ignoring invalid product profile from ESP32 %s", device_id)
-            profiles.pop(device_id, None)
-        else:
-            profiles[device_id] = profile
-        update_profile_state(device_id)
-
     @callback
-    def mqtt_connection_changed(connected: bool) -> None:
-        """Forget cached profiles on disconnect until retained state is replayed."""
-        if connected:
-            return
-        profiles.clear()
-        for device_id, gateway in data[DATA_GATEWAYS].items():
-            was_valid = gateway["profile_valid"]
-            gateway["profile_valid"] = False
-            if was_valid:
-                for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
-                    if sensor_gateway_id == device_id:
-                        async_write_sensor_state(data, device_id, mac)
-                _fire_state_updated(hass, device_id)
+    def manager_device_event(event) -> None:
+        """Apply a device snapshot event emitted by ESP32 Manager."""
+        snapshot = event.data.get("device")
+        if isinstance(snapshot, dict):
+            sync_gateway_from_manager(snapshot)
 
-    async def identity_message(msg: mqtt.ReceiveMessage) -> None:
-        """Handle the Platform Core gateway identity."""
-        match = re.fullmatch(r"esp32/([0-9A-Fa-f]{12})/device/info", msg.topic)
-        if not match:
-            return
-        topic_id = match.group(1).upper()
-        try:
-            payload = json.loads(msg.payload)
-        except (ValueError, TypeError):
-            _LOGGER.warning("Ignoring invalid ESP32 identity payload")
-            return
-        if not isinstance(payload, dict):
-            return
-        raw_device_id = payload.get("id")
-        raw_name = payload.get("name")
-        raw_model = payload.get("model", "ESP32")
-        raw_sw_version = payload.get("sw_version")
-        if not isinstance(raw_device_id, str) or not isinstance(raw_name, str):
-            _LOGGER.warning("Ignoring invalid ESP32 identity message")
-            return
-        device_id = raw_device_id.upper()
-        name = raw_name.strip()
-        model = raw_model.strip() if isinstance(raw_model, str) else "ESP32"
-        if (
-            device_id != topic_id
-            or not DEVICE_ID_RE.fullmatch(device_id)
-            or not name
-        ):
-            _LOGGER.warning("Ignoring invalid ESP32 identity message")
-            return
-        gateway = ensure_gateway(device_id)
-        gateway["identity_received"] = True
-        gateway["name"] = name[:64]
-        gateway["model"] = (model or "ESP32")[:64]
-        gateway["sw_version"] = (
-            raw_sw_version.strip()[:64]
-            if isinstance(raw_sw_version, str) and raw_sw_version.strip()
-            else None
-        )
-        # Refresh the shared registry entry with the identity fields.
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            identifiers={(DEVICE_IDENTIFIER_NAMESPACE, device_id)},
-            name=gateway["name"],
-            model=gateway["model"],
-            manufacturer="Espressif",
-        )
-        update_profile_state(device_id)
+    async def manager_device_removed(event) -> None:
+        """Finalize XSM cleanup after ESP32 Manager removes the central device."""
+        device_id = str(event.data.get("device_id", "")).upper()
+        if DEVICE_ID_RE.fullmatch(device_id):
+            # The Manager removal callback runs before its own registry/state
+            # cleanup. Repeat cleanup on the final lifecycle event so any
+            # concurrent MQTT availability/update event cannot leave a stale
+            # gateway in the panel's runtime projection.
+            await remove_gateway_data(device_id)
 
-    async def availability_message(msg: mqtt.ReceiveMessage) -> None:
-        """Track gateway availability independently of esp32_ota."""
-        match = re.fullmatch(r"esp32/([0-9A-Fa-f]{12})/availability", msg.topic)
-        if not match:
+    async def remove_gateway_data(device_id_value: str) -> None:
+        """Remove all Xiaomi-owned state for one ESP32 gateway."""
+        device_id = str(device_id_value).upper()
+        if not DEVICE_ID_RE.fullmatch(device_id):
             return
-        payload = str(msg.payload).strip().lower()
-        if payload not in ("online", "offline"):
-            _LOGGER.warning("Ignoring invalid ESP32 availability payload")
-            return
-        device_id = match.group(1).upper()
-        gateway = ensure_gateway(device_id)
-        gateway["available"] = payload == "online"
-        gateway["availability_received"] = True
-        if payload == "offline":
-            # Discovered sensors are transient observations, not persisted state.
-            # Keep the saved registry intact and wait for fresh advertisements
-            # after the gateway reconnects.
-            gateway["discovered"] = {}
-            gateway["discovered_received"] = False
-            # Measurements observed before a gateway disconnect must not make
-            # sensors appear online immediately after the gateway reconnects.
-            for sensor_key in tuple(data["last_measurements"]):
-                if sensor_key[0] == device_id:
-                    data["last_measurements"].pop(sensor_key, None)
-        for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
-            if sensor_gateway_id == device_id:
-                async_write_sensor_state(data, device_id, mac)
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        macs: set[str] = set()
+        if gateway is not None:
+            macs.update(gateway["registry"])
+            macs.update(gateway["discovered"])
+        for collection in (DATA_MEASUREMENTS, "last_measurements"):
+            macs.update(mac for (gateway_id, mac) in data[collection] if gateway_id == device_id)
+        macs.update(mac for gateway_id, mac in data[DATA_REMOVED_SENSORS] if gateway_id == device_id)
+        macs.update(mac for gateway_id, mac in data[DATA_SENSOR_ENTITIES] if gateway_id == device_id)
+
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        unique_id_pattern = re.compile(
+            rf"^{re.escape(device_id)}_([0-9A-F]{{12}})_(temperature|humidity|battery)$"
+        )
+        for registry_entry in tuple(entity_registry.entities.values()):
+            if registry_entry.config_entry_id != entry.entry_id or registry_entry.platform != DOMAIN:
+                continue
+            match = unique_id_pattern.fullmatch(registry_entry.unique_id)
+            if match is None:
+                continue
+            compact_mac = match.group(1)
+            mac = ":".join(compact_mac[index:index + 2] for index in range(0, 12, 2))
+            macs.add(mac)
+            entity_registry.async_remove(registry_entry.entity_id)
+
+        topics = [
+            f"esp32/{device_id}/xiaomi/discovered",
+            f"esp32/{device_id}/xiaomi/registry",
+        ]
+        topics.extend(f"esp32/{device_id}/xiaomi/sensor/{mac}/state" for mac in macs)
+        for topic in topics:
+            try:
+                await mqtt.async_publish(hass, topic, "", qos=1, retain=True)
+            except Exception:
+                _LOGGER.warning(
+                    "Unable to clear retained Xiaomi topic %s during ESP32 removal",
+                    topic, exc_info=True,
+                )
+
+        # Remove every child device by its stable identifier, including
+        # orphaned Device Registry entries with no remaining entity rows.
+        for child in tuple(device_registry.devices.values()):
+            if any(
+                namespace == DOMAIN and identifier.startswith(f"{device_id}_")
+                for namespace, identifier in child.identifiers
+            ):
+                device_registry.async_remove_device(child.id)
+
+        # Older XSM versions created a separate gateway device under the
+        # integration's own identifier. The gateway is now owned exclusively
+        # by ESP32 Manager, so remove that obsolete duplicate as well.
+        legacy_gateway = device_registry.async_get_device(
+            identifiers={(DOMAIN, device_id)}
+        )
+        if legacy_gateway is not None:
+            device_registry.async_remove_device(legacy_gateway.id)
+
+        for collection in (DATA_MEASUREMENTS, "last_measurements", DATA_SENSOR_ENTITIES):
+            for key in tuple(data[collection]):
+                if key[0] == device_id:
+                    data[collection].pop(key, None)
+        removed_changed = False
+        for key in tuple(data[DATA_REMOVED_SENSORS]):
+            if key[0] == device_id:
+                data[DATA_REMOVED_SENSORS].discard(key)
+                removed_changed = True
+        if removed_changed:
+            await save_removed_sensors()
+
+        for key, pending in tuple(data[DATA_PENDING].items()):
+            if key[0] == device_id:
+                future = pending["future"]
+                if not future.done():
+                    future.cancel()
+                data[DATA_PENDING].pop(key, None)
+        for mac, reservation in tuple(data[DATA_PENDING_ADDS].items()):
+            if reservation.get("device_id") == device_id:
+                data[DATA_PENDING_ADDS].pop(mac, None)
+
+        data[DATA_GATEWAYS].pop(device_id, None)
         _fire_state_updated(hass, device_id)
+
+    # Keep the callback available to Home Assistant's manual Device Registry
+    # removal flow for obsolete XSM-owned gateway entries.
+    data["remove_gateway_data"] = remove_gateway_data
+
+    # Clean up orphaned gateway entries left behind by older XSM versions.
+    # Do not touch the central ESP32 Manager device or legacy entries that
+    # still have child devices attached to them.
+    device_registry = dr.async_get(hass)
+    for legacy_device in tuple(device_registry.devices.values()):
+        legacy_device_id = next(
+            (
+                identifier
+                for namespace, identifier in legacy_device.identifiers
+                if namespace == DOMAIN and DEVICE_ID_RE.fullmatch(identifier)
+            ),
+            None,
+        )
+        if legacy_device_id is None:
+            continue
+        has_children = any(
+            child.via_device_id == legacy_device.id
+            for child in device_registry.devices.values()
+        )
+        if not has_children:
+            device_registry.async_remove_device(legacy_device.id)
 
     async def xiaomi_message(msg: mqtt.ReceiveMessage) -> None:
         """Process retained snapshots and command results for every gateway."""
@@ -392,7 +428,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         device_id = match.group(1).upper()
         message_type = match.group(2)
-        gateway = ensure_gateway(device_id)
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        if gateway is None or not gateway["identity_received"]:
+            return
 
         if message_type in ("discovered", "registry"):
             snapshot = _parse_snapshot(msg.payload)
@@ -514,6 +552,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mac = match.group(2).upper()
         if not MAC_RE.fullmatch(mac):
             return
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        if gateway is None or not gateway["identity_received"]:
+            return
         key = (device_id, mac)
         if key in data[DATA_REMOVED_SENSORS]:
             # Ignore stale retained or live measurements from a locally removed
@@ -580,17 +621,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_write_sensor_state(data, device_id, mac)
         _fire_state_updated(hass, device_id)
 
+    # Seed from the central registry. ESP32 Manager exclusively owns
+    # common identity/profile/availability MQTT subscriptions.
+    for snapshot in manager_api["get_devices"]():
+        sync_gateway_from_manager(snapshot)
+
     data[DATA_UNSUB] = [
-        await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
-        await mqtt.async_subscribe(hass, PROFILE_TOPIC, profile_message, qos=1),
-        await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
+        hass.bus.async_listen(ESP32_MANAGER_EVENT_ADDED, manager_device_event),
+        hass.bus.async_listen(ESP32_MANAGER_EVENT_UPDATED, manager_device_event),
+        hass.bus.async_listen(ESP32_MANAGER_EVENT_REMOVED, manager_device_removed),
+        manager_api["register_remove_handler"](DOMAIN, remove_gateway_data),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, MEASUREMENTS_TOPIC, measurement_message, qos=1),
-        async_dispatcher_connect(
-            hass, MQTT_CONNECTION_STATE, mqtt_connection_changed
-        ),
     ]
 
     async def send_command(
@@ -863,6 +907,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removal of obsolete XSM-owned gateway device entries."""
+    if device_entry.config_entry_id != entry.entry_id:
+        return False
+
+    device_id = next(
+        (
+            identifier.upper()
+            for namespace, identifier in device_entry.identifiers
+            if namespace in (DOMAIN, DEVICE_IDENTIFIER_NAMESPACE)
+            and DEVICE_ID_RE.fullmatch(identifier.upper())
+        ),
+        None,
+    )
+    if device_id is None:
+        return False
+
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    remove_gateway_data = data.get("remove_gateway_data") if data else None
+    if remove_gateway_data is not None:
+        await remove_gateway_data(device_id)
+
+    # Home Assistant removes the Device Registry entry after this callback
+    # returns True. The cleanup handler removes its children and stale data.
+    return True
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the integration entry."""
     if not await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR]):
@@ -871,7 +943,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
         hass.data[DOMAIN]["_panel_registered"] = False
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
-    data.get("profiles", {}).clear()
     for unsubscribe in data.get(DATA_UNSUB, []):
         unsubscribe()
     for pending in data.get(DATA_PENDING, {}).values():

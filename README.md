@@ -6,12 +6,11 @@
 
 ## Установка через HACS
 
-1. Откройте **HACS → Integrations**.
-2. Откройте меню в правом верхнем углу и выберите **Custom repositories**.
-3. Добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` с категорией **Integration**.
-4. Найдите **ESP32 Xiaomi Sensor Manager** и установите интеграцию.
-5. Перезапустите Home Assistant.
-6. В **Settings → Devices & services → Add integration** найдите **ESP32 Xiaomi Sensor Manager** и добавьте её.
+1. Сначала добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-manager` в **HACS → Integrations → Custom repositories**, установите **ESP32 Manager** и добавьте его через **Settings → Devices & services → Add integration**.
+2. Затем добавьте репозиторий `lavrenovalexsandr-cmyk/esp32-integration-xiaomi-sensor-manager` в HACS и установите **ESP32 Xiaomi Sensor Manager**.
+3. Перезапустите Home Assistant, если HACS запросит это.
+4. Добавьте **ESP32 Xiaomi Sensor Manager** через **Settings → Devices & services → Add integration**.
+
 
 Отдельно настройте штатную интеграцию **MQTT** в Home Assistant и убедитесь, что брокер подключён к ESP32. Xiaomi-интеграция использует уже настроенное MQTT-подключение и не требует адреса брокера или учётных данных в своей конфигурации.
 
@@ -25,30 +24,27 @@
 
 ## Назначение и границы ответственности
 
-Интеграция обслуживает Xiaomi-специфичные операции и координацию нескольких ESP32-шлюзов. Общие функции управления ESP32 (OTA, Restart, Factory Reset) остаются в универсальной интеграции `esp32_ota`; базовая идентификация шлюза относится к Platform Core и общему MQTT-контракту.
+Интеграция обслуживает Xiaomi-специфичные операции и координацию нескольких ESP32-шлюзов. Общие функции управления ESP32 (OTA, Restart, Factory Reset), обнаружение, identity, profile, availability и общий реестр устройств принадлежат ESP32 Manager.
 
 Распределение ответственности:
 
 - **Firmware:** BLE-обнаружение, хранение bind-key в NVS, реестр, команды и результаты команд, retained snapshots и retained измерения по MQTT v1.
-- **Platform Core:** общая идентичность и доступность ESP32, MQTT и Discovery только для общих сущностей шлюза. Xiaomi-сущности через Platform Core Discovery не создаются.
-- **Универсальная интеграция `esp32_ota`:** OTA и общие команды управления; она также использует общую запись шлюза в HA, но не является обязательной для Xiaomi-интеграции.
-- **Общий MQTT-контракт / Platform Core:** стабильная идентичность шлюза и его базовые данные.
-- **Эта Xiaomi-интеграция:** MQTT snapshots и measurements, состояние по каждому шлюзу, правило «один MAC — один шлюз», сервисы add/remove, безопасная передача bind-key, создание/удаление HA-устройств и сенсоров, панель управления.
+- **ESP32 Manager (`esp32_ota`):** единственный источник общих сведений о шлюзах; обнаружение, identity, profile, availability, общая запись Device Registry, публичный API и события жизненного цикла; OTA и общие системные команды.
+- **Platform Core:** стабильная аппаратная идентичность, общие MQTT-контракты и платформенные механизмы прошивки.
+- **Эта Xiaomi-интеграция:** только Xiaomi snapshots и measurements, доменное состояние по каждому шлюзу, правило «один MAC — один шлюз», сервисы add/remove, безопасная передача bind-key, создание/удаление дочерних Xiaomi-устройств и сенсоров, панель управления.
 - **Панель Xiaomi Sensor Manager:** выбор шлюза и датчика, отображение `New`/`Save`, добавление и удаление через сервисы интеграции. Панель не публикует MQTT напрямую и не сохраняет bind-key.
 
 ## Общая идентификация ESP32-шлюза
 
-Xiaomi-интеграция независима от `esp32_ota`: она не должна импортировать её код или требовать её установки.
-
-Для объединения сведений разных ESP32-интеграций в одну запись Home Assistant Device Registry используется общий идентификатор шлюза:
+Xiaomi Sensor Manager объявляет `esp32_ota` обязательной зависимостью в `manifest.json`. ESP32 Manager создаёт общую запись физического устройства с identifier:
 
 ```python
 identifiers={("esp32", device_id)}
 ```
 
-Здесь `esp32` — общий namespace платформы, а `device_id` — стабильный ID из MQTT identity. Имя и модель шлюза берутся из тех же полей MQTT identity (`name` и `model`), чтобы интеграции показывали согласованные данные.
+Xiaomi-интеграция не подписывается на общие MQTT-топики identity, profile и availability, не создаёт запись шлюза в Device Registry и не хранит собственную копию общих метаданных. При запуске она получает snapshot устройств через публичный API `hass.data["esp32_ota"]["api"]`, затем обновляет свой runtime-проекционный статус по событиям `esp32_ota_device_added` и `esp32_ota_device_updated`.
 
-**Реализация:** интеграция самостоятельно получает MQTT identity шлюзов и использует `("esp32", device_id)` при регистрации/обогащении gateway device. Она не использует `("esp32_ota", device_id)` и не зависит от наличия `esp32_ota`. Сервисы Xiaomi принимают стабильный `device_id`.
+Из API используются `get_devices()` и `get_device(device_id)`. Для каскадного удаления Xiaomi Sensor Manager регистрирует собственный async cleanup handler через `register_remove_handler`. Интеграция продолжает самостоятельно обрабатывать только продуктовые топики Xiaomi: discovered, registry, command/result и sensor measurements.
 
 ## Возможности
 
@@ -80,7 +76,7 @@ identifiers={("esp32", device_id)}
 - `device_id` — стабильный ID выбранного ESP32-шлюза;
 - `mac` — MAC датчика.
 
-Используем стабильный `device_id` из MQTT identity. Он совпадает с ID, используемым сервисами `esp32_ota`, но Xiaomi-интеграция не зависит от наличия этой интеграции. Идентификатор шлюза не является MAC датчика.
+Используется стабильный `device_id` из snapshot ESP32 Manager. Он совпадает с ID, используемым сервисами `esp32_ota`; идентификатор шлюза не является MAC датчика.
 
 ## Состояние датчиков
 
@@ -95,9 +91,11 @@ Snapshots всегда хранятся раздельно по gateway device I
 
 ## Home Assistant устройства и Areas
 
-Xiaomi-интеграция самостоятельно получает MQTT identity шлюзов и использует общий Device Registry identifier `("esp32", device_id)`. Если `esp32_ota` установлена, обе интеграции дополняют одну запись шлюза, а не создают две. Xiaomi-интеграция создаёт дочернее HA-устройство для каждого MAC из retained `registry` и три сущности: температуру, влажность и батарею. В `device_info` дочернего устройства указывается `via_device` с общим идентификатором ESP32 `("esp32", device_id)`. При исключении MAC из registry интеграция удаляет соответствующие сенсоры и устройство. Неизвестные измерения остаются `unknown`, пока датчик не передаст соответствующие данные.
+ESP32 Manager создаёт общую запись физического шлюза. Xiaomi Sensor Manager создаёт дочернее HA-устройство для каждого MAC из retained `registry` и три сущности: температуру, влажность и батарею. В `device_info` дочернего устройства указывается `via_device` с общим идентификатором ESP32 `("esp32", device_id)`. При исключении MAC из registry интеграция удаляет соответствующие сенсоры и устройство. Неизвестные измерения остаются `unknown`, пока датчик не передаст соответствующие данные.
 
-Интеграция подписывается на `esp32/+/xiaomi/sensor/+/state`. Retained измерения могут прийти до registry или до identity шлюза; реализация должна кэшировать такие данные и применять их после получения необходимых сведений. Доступность сенсоров зависит от availability шлюза.
+Интеграция подписывается на `esp32/+/xiaomi/sensor/+/state`. Обработка продуктовых сообщений разрешается только для шлюзов, уже известных ESP32 Manager. Общие identity/profile/availability обрабатывает Manager. Доступность сенсоров зависит от центрального availability и валидности профиля.
+
+При полном удалении шлюза ESP32 Manager вызывает зарегистрированный cleanup handler Xiaomi Sensor Manager. XSM удаляет все дочерние Xiaomi-устройства и сущности, связанные retained measurements, runtime-кэш, pending-команды и persistent tombstones конкретного шлюза. Retained Xiaomi snapshots и measurements этого шлюза очищаются; данные других ESP32 не затрагиваются.
 
 Комнаты не передаются по MQTT и не хранятся в firmware. Пользователь назначает Area штатными средствами Home Assistant.
 
@@ -124,7 +122,7 @@ MQTT v1 согласован и реализован на стороне firmwar
 
 Панель входит в этот репозиторий интеграции, регистрируется как custom panel Home Assistant и доступна администраторам. Она должна:
 
-1. позволять выбрать ESP32-шлюз, известный Xiaomi-интеграции по MQTT identity, независимо от установки `esp32_ota`;
+1. позволять выбрать ESP32-шлюз, известный центральному реестру ESP32 Manager;
 2. показывать обнаруженные и сохранённые датчики выбранного шлюза;
 3. помечать сохранённые датчики как **Save**, новые — как **New**;
 4. предоставлять поле bind-key только для добавления;
