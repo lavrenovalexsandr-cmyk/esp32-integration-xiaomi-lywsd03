@@ -346,6 +346,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ):
                 device_registry.async_remove_device(child.id)
 
+        # Older XSM versions created a separate gateway device under the
+        # integration's own identifier. The gateway is now owned exclusively
+        # by ESP32 Manager, so remove that obsolete duplicate as well.
+        legacy_gateway = device_registry.async_get_device(
+            identifiers={(DOMAIN, device_id)}
+        )
+        if legacy_gateway is not None:
+            device_registry.async_remove_device(legacy_gateway.id)
+
         for collection in (DATA_MEASUREMENTS, "last_measurements", DATA_SENSOR_ENTITIES):
             for key in tuple(data[collection]):
                 if key[0] == device_id:
@@ -370,6 +379,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         data[DATA_GATEWAYS].pop(device_id, None)
         _fire_state_updated(hass, device_id)
+
+    # Keep the callback available to Home Assistant's manual Device Registry
+    # removal flow for obsolete XSM-owned gateway entries.
+    data["remove_gateway_data"] = remove_gateway_data
+
+    # Clean up orphaned gateway entries left behind by older XSM versions.
+    # Do not touch the central ESP32 Manager device or legacy entries that
+    # still have child devices attached to them.
+    device_registry = dr.async_get(hass)
+    for legacy_device in tuple(device_registry.devices.values()):
+        legacy_device_id = next(
+            (
+                identifier
+                for namespace, identifier in legacy_device.identifiers
+                if namespace == DOMAIN and DEVICE_ID_RE.fullmatch(identifier)
+            ),
+            None,
+        )
+        if legacy_device_id is None:
+            continue
+        has_children = any(
+            child.via_device_id == legacy_device.id
+            for child in device_registry.devices.values()
+        )
+        if not has_children:
+            device_registry.async_remove_device(legacy_device.id)
 
     async def xiaomi_message(msg: mqtt.ReceiveMessage) -> None:
         """Process retained snapshots and command results for every gateway."""
@@ -856,6 +891,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data[DOMAIN]["_panel_registered"] = True
 
+    return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removal of obsolete XSM-owned gateway device entries."""
+    device_id = next(
+        (
+            identifier.upper()
+            for namespace, identifier in device_entry.identifiers
+            if namespace == DOMAIN and DEVICE_ID_RE.fullmatch(identifier.upper())
+        ),
+        None,
+    )
+    if device_id is None:
+        # The shared ESP32 device belongs to ESP32 Manager, not XSM.
+        return False
+
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    remove_gateway_data = data.get("remove_gateway_data") if data else None
+    if remove_gateway_data is not None:
+        await remove_gateway_data(device_id)
+    else:
+        # Runtime state may not be loaded; remove the stale XSM-owned record.
+        dr.async_get(hass).async_remove_device(device_entry.id)
     return True
 
 
