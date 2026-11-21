@@ -158,8 +158,18 @@ async def websocket_get_state(
         for gateway in data[DATA_GATEWAYS].values():
             if not gateway["identity_received"]:
                 continue
-            # The user-assigned name is projected from ESP32 Manager's public snapshot.
-            display_name = gateway.get("name_by_user") or gateway["name"]
+            # Resolve the current user-assigned name from the central API so
+            # Home Assistant renames are reflected without waiting for MQTT.
+            manager_api = data.get("manager_api")
+            manager_device = (
+                manager_api["get_device"](gateway["device_id"])
+                if manager_api is not None else None
+            )
+            display_name = (
+                manager_device.get("name_by_user")
+                if manager_device and manager_device.get("name_by_user")
+                else gateway["name"]
+            )
             gateways.append(
                 {
                     "device_id": gateway["device_id"],
@@ -210,6 +220,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data: dict[str, Any] = {
         DATA_GATEWAYS: {},
         DATA_UNSUB: [],
+        "manager_api": manager_api,
         DATA_PENDING: {},
         DATA_PENDING_ADDS: {},
         DATA_REMOVED_SENSORS: removed_sensors,
