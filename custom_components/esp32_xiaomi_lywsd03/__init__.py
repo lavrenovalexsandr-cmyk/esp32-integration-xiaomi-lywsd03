@@ -39,6 +39,7 @@ from .const import (
     EVENT_COMMAND_RESULT,
     EVENT_STATE_UPDATED,
     IDENTITY_TOPIC,
+    PROFILE_TOPIC,
     MEASUREMENTS_TOPIC,
     MAC_PATTERN,
     MAX_SENSORS_PER_GATEWAY,
@@ -71,6 +72,25 @@ RESULT_MESSAGES = {
 }
 
 
+def _profile_matches_gateway(gateway: dict[str, Any], profile: Any) -> bool:
+    """Return whether a product profile is valid for this Xiaomi integration."""
+    if not isinstance(profile, dict):
+        return False
+    capabilities = profile.get("capabilities")
+    firmware_version = profile.get("firmware_version")
+    return (
+        type(profile.get("schema_version")) is int
+        and profile["schema_version"] == 1
+        and profile.get("product_id") == "xiaomi_ble_gateway"
+        and isinstance(firmware_version, str)
+        and bool(firmware_version)
+        and firmware_version == gateway.get("sw_version")
+        and isinstance(capabilities, list)
+        and all(isinstance(item, str) for item in capabilities)
+        and "xiaomi_lywsd03" in capabilities
+    )
+
+
 def _new_gateway(device_id: str) -> dict[str, Any]:
     """Return an empty in-memory state for a gateway."""
     return {
@@ -80,6 +100,8 @@ def _new_gateway(device_id: str) -> dict[str, Any]:
         "available": False,
         "availability_received": False,
         "identity_received": False,
+        "sw_version": None,
+        "profile_valid": False,
         "discovered": {},
         "registry": set(),
         "registry_received": False,
@@ -171,6 +193,12 @@ async def websocket_get_state(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Xiaomi integration entry."""
+    if not isinstance(entry.runtime_data, dict):
+        entry.runtime_data = {"profiles": {}}
+    else:
+        entry.runtime_data.setdefault("profiles", {})
+    profiles: dict[str, Any] = entry.runtime_data["profiles"]
+
     removed_store = Store(
         hass, 1, f"{DOMAIN}_{entry.entry_id}_removed_sensors"
     )
@@ -215,6 +243,66 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Return the runtime state for one gateway."""
         return _gateway_state(data, device_id)
 
+    def update_profile_state(device_id: str) -> None:
+        """Re-evaluate the cached profile against the current device info."""
+        gateway = data[DATA_GATEWAYS].get(device_id)
+        if gateway is None:
+            return
+        profile = profiles.get(device_id)
+        was_valid = gateway["profile_valid"]
+        is_valid = (
+            gateway["identity_received"]
+            and _profile_matches_gateway(gateway, profile)
+        )
+        gateway["profile_valid"] = is_valid
+        if is_valid:
+            async_reconcile_gateway(hass, entry, data, device_id)
+        if was_valid != is_valid:
+            for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
+                if sensor_gateway_id == device_id:
+                    async_write_sensor_state(data, device_id, mac)
+        _fire_state_updated(hass, device_id)
+
+    async def profile_message(msg: mqtt.ReceiveMessage) -> None:
+        """Handle the retained product profile for an ESP32 gateway."""
+        match = re.fullmatch(
+            r"esp32/([0-9A-Fa-f]{12})/device/profile", msg.topic
+        )
+        if not match:
+            return
+        device_id = match.group(1).upper()
+        payload = msg.payload
+        if not payload:
+            profiles.pop(device_id, None)
+            update_profile_state(device_id)
+            return
+        try:
+            profile = json.loads(payload)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Ignoring invalid product profile from ESP32 %s", device_id)
+            profiles.pop(device_id, None)
+            update_profile_state(device_id)
+            return
+        if not isinstance(profile, dict):
+            _LOGGER.warning("Ignoring invalid product profile from ESP32 %s", device_id)
+            profiles.pop(device_id, None)
+        else:
+            profiles[device_id] = profile
+        update_profile_state(device_id)
+
+    @callback
+    def mqtt_disconnected(event: Any) -> None:
+        """Forget cached profiles until retained state is replayed after reconnect."""
+        profiles.clear()
+        for device_id, gateway in data[DATA_GATEWAYS].items():
+            was_valid = gateway["profile_valid"]
+            gateway["profile_valid"] = False
+            if was_valid:
+                for (sensor_gateway_id, mac) in tuple(data[DATA_SENSOR_ENTITIES]):
+                    if sensor_gateway_id == device_id:
+                        async_write_sensor_state(data, device_id, mac)
+                _fire_state_updated(hass, device_id)
+
     async def identity_message(msg: mqtt.ReceiveMessage) -> None:
         """Handle the Platform Core gateway identity."""
         match = re.fullmatch(r"esp32/([0-9A-Fa-f]{12})/device/info", msg.topic)
@@ -231,6 +319,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raw_device_id = payload.get("id")
         raw_name = payload.get("name")
         raw_model = payload.get("model", "ESP32")
+        raw_sw_version = payload.get("sw_version")
         if not isinstance(raw_device_id, str) or not isinstance(raw_name, str):
             _LOGGER.warning("Ignoring invalid ESP32 identity message")
             return
@@ -248,6 +337,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         gateway["identity_received"] = True
         gateway["name"] = name[:64]
         gateway["model"] = (model or "ESP32")[:64]
+        gateway["sw_version"] = (
+            raw_sw_version.strip()[:64]
+            if isinstance(raw_sw_version, str) and raw_sw_version.strip()
+            else None
+        )
         # Refresh the shared registry entry with the identity fields.
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
@@ -256,8 +350,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             model=gateway["model"],
             manufacturer="Espressif",
         )
-        async_reconcile_gateway(hass, entry, data, device_id)
-        _fire_state_updated(hass, device_id)
+        update_profile_state(device_id)
 
     async def availability_message(msg: mqtt.ReceiveMessage) -> None:
         """Track gateway availability independently of esp32_ota."""
@@ -488,11 +581,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     data[DATA_UNSUB] = [
         await mqtt.async_subscribe(hass, IDENTITY_TOPIC, identity_message, qos=1),
+        await mqtt.async_subscribe(hass, PROFILE_TOPIC, profile_message, qos=1),
         await mqtt.async_subscribe(hass, AVAILABILITY_TOPIC, availability_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[0], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[1], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, XIAOMI_TOPICS[2], xiaomi_message, qos=1),
         await mqtt.async_subscribe(hass, MEASUREMENTS_TOPIC, measurement_message, qos=1),
+        hass.bus.async_listen("mqtt_disconnected", mqtt_disconnected),
     ]
 
     async def send_command(
@@ -773,6 +868,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
         hass.data[DOMAIN]["_panel_registered"] = False
     data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, {})
+    runtime_data = getattr(entry, "runtime_data", None)
+    if isinstance(runtime_data, dict):
+        runtime_data.clear()
+    entry.runtime_data = None
     for unsubscribe in data.get(DATA_UNSUB, []):
         unsubscribe()
     for pending in data.get(DATA_PENDING, {}).values():
